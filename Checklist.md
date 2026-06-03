@@ -25,8 +25,8 @@ Goal: a reproducible skeleton that boots clean from a fresh clone, with the risk
 - [x] Finalize `.gitignore` (Python base + Node + .NET/tModLoader + `.personal/` + data volumes). Verify `git check-ignore .personal/<file>` returns the path.
 - [x] `.gitkeep` in every empty folder of the §3 layout.
 - [x] `.github/pull_request_template.md` (adapted — see note below).
-- [~] `CONTRIBUTING.md` at root.
-- [~] Root `README.md` (stub; expanded later).
+- [x] `CONTRIBUTING.md` at root.
+- [x] Root `README.md` (stub; expanded later).
 - [x] Commit drafted `deliverables/DECISIONS.md` and `deliverables/ARCH.md`.
 - [x] Create empty `deliverables/{RUNBOOK,EVALS,SECURITY,LICENSES}.md` stubs.
 - [x] `eval_thresholds.yaml` created with placeholder keys (values `PENDING`, filled in S2/S6).
