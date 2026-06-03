@@ -146,3 +146,24 @@ Use the **Streamlit admin test chat** to exercise the exact `/bot/ask` path with
 - **pgvector extension** must be created in the first migration (`CREATE EXTENSION vector`).
 - **tModLoader can't find .NET 8 SDK** (Linux/Steam): see the Phase 1.2 spike notes; install the SDK system-wide via apt, or build via `start-tModLoader.sh -build`.
 - **Empty RAG answers** usually mean the wrong `game_version` filter or an unbuilt corpus — check `manifest.json` and the tenant's selected version.
+
+## 9. Spike Findings (Phase 1.2)
+
+The throwaway spike (code in `spike/`) verified the backend↔client bridge. Findings that inform later phases:
+
+### Environment
+- **Snap Steam cannot see a system-installed .NET SDK.** Snap confinement blocks `/usr/share/dotnet`, so tModLoader's "Develop Mods" reports the SDK as missing even though `dotnet --list-sdks` works in a normal shell. **Fix: replace Snap Steam with the official deb** (`sudo add-apt-repository multiverse && sudo apt install steam-installer`), then reinstall Terraria + tModLoader. With native Steam + the apt .NET 8 SDK, the SDK is detected immediately.
+- **Version target:** tModLoader v2026.4.3.0 (current stable) targets **Terraria 1.4.4.9**. Corpus `game_version` is locked to `1.4.4.9` (D-016).
+
+### tModLoader API / threading (carry into the Phase 4 client)
+- Command: a `ModCommand` with `CommandType.Chat` and `Command => "bot"` is invoked in-game as `/bot <message>`.
+- Live state read: `Main.LocalPlayer.statLife` returns current HP. The same access pattern extends to `armor[]`, `inventory[]`, `HeldItem`, and the `NPC.downed*` flags in Phase 4.
+- **Never block the game thread:** `Action` is `void`; kick off the HTTP call with fire-and-forget (`_ = AskAsync(...)`) and print a synchronous "thinking…" first.
+- **Critical:** after an `await`, execution is on a background thread. Any `Main.*` UI call (e.g. `Main.NewText`) **must** be marshaled back with `Main.QueueMainThreadAction(...)` or it crashes intermittently. This is the most likely source of confusing, non-deterministic crashes.
+- Use a single static `HttpClient` for the mod's lifetime — do not create one per call.
+
+### Networking
+- `http://localhost:8000` is reachable from inside tModLoader (confirmed). **Open question for Phase 4 (P-009):** does the real client point at `localhost` (player runs the stack locally) or a hosted backend URL? Decide in the client phase.
+
+### Result
+- **Verified 2026-06-03:** in-game `/bot` round-tripped to the local echo server; reply rendered in chat with live HP. Phase 1.2 success criterion met; the project's riskiest unknown (the C#↔Python bridge) is resolved.
