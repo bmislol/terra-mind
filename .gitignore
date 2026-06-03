@@ -199,7 +199,8 @@ cython_debug/
 #   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
 #   and can be added to the global gitignore or merged into this file. However, if you prefer, 
 #   you could uncomment the following to ignore the entire vscode folder
-# .vscode/
+.vscode/
+.idea/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
 
@@ -216,3 +217,43 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+# === TerraMind additions (append below the Python base) ===
+
+# Project-private notes — MUST stay out of git
+.personal/
+
+# Keep the example env, ignore real ones (refines the bare .env rule above)
+.env.*
+!.env.example
+
+# Node / React frontend
+node_modules/
+dist-ssr/
+.vite/
+.eslintcache
+*.local
+pnpm-debug.log*
+yarn-error.log*
+
+# C# / .NET / tModLoader client
+bin/
+obj/
+*.user
+*.tmod
+ModSources/*/bin/
+ModSources/*/obj/
+
+# Local data volumes & scraped corpus (regenerate, don't commit)
+pgdata/
+redis-data/
+vault-data/
+minio-data/
+data/raw/
+data/corpus/
+
+# IDE / OS
+.idea/
+.DS_Store
+Thumbs.db

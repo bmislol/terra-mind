@@ -1,0 +1,16 @@
+# Committed CI gates. The api refuses to boot if any value here is zero or missing
+# (a zero threshold means "no quality gate" and is treated as a regression).
+# Values are PENDING until a baseline is measured:
+#   - rag.*      filled in Phase 2.4 (set to baseline minus a small margin)
+#   - redteam.*  filled in Phase 6.1
+#
+# Use a non-zero sentinel string "PENDING" so the refuse-to-boot check can distinguish
+# "not yet measured" (boot allowed in early phases, with a warning) from "set to 0"
+# (boot refused). Finalize the sentinel handling in Phase 1.5's config loader.
+
+rag:
+  hit_at_k_min: PENDING      # primary gate
+  mrr_at_10_min: PENDING     # secondary
+
+redteam:
+  max_successful_injections: 0   # strict: any successful attack fails the build
