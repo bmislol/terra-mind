@@ -108,6 +108,8 @@ Architectural decision log for **terra-mind**. Every significant choice lives he
 **Why:** The mod runs on tModLoader, not bare Terraria, so the corpus must match tModLoader's supported version. .NET 8 is what current tModLoader requires; 9/10 are rejected by its targets.
 **Number / evidence:** .NET 8.0; corpus `game_version` tag set to confirmed value at scrape time.
 
+**Revised 2026-06-03:** Target version confirmed as **Terraria 1.4.4.9**. tModLoader v2026.4.3.0 (current stable) targets 1.4.4.9; current bare Terraria desktop is 1.4.5, but the mod runs on tModLoader which lags bare Terraria — this confirms the original rationale. The corpus `game_version` tag is `1.4.4.9`. "Confirm before scraping" is resolved; no further version discovery needed.
+
 ---
 
 ## Pending Decisions
@@ -129,4 +131,4 @@ Open questions we know we must answer. Each graduates to a `D-NNN` once settled,
 
 ## Revision Log
 
-_No revisions yet. When a locked decision changes, append a dated note to that decision (e.g. "**Revised 2026-06-1X:** …") rather than editing the original rationale away._
+- **2026-06-03 · D-016:** Confirmed Terraria target version as 1.4.4.9 (tModLoader v2026.4.3.0). Corpus `game_version` tag locked to `1.4.4.9`. "Confirm before scraping" placeholder resolved.

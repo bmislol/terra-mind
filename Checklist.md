@@ -35,12 +35,11 @@ Goal: a reproducible skeleton that boots clean from a fresh clone, with the risk
 
 ### Phase 1.2 · tModLoader spike — `feat/02-tmodloader-spike`
 > Riskiest unknown first. Throwaway — proves the bridge, not a feature.
-- [ ] Confirm tModLoader → Develop Mods detects the .NET 8 SDK (the one tonight's check covered).
-- [ ] Minimal mod: read current HP from `Main.LocalPlayer`.
-- [ ] Async `HttpClient` POST to a local FastAPI echo stub; print reply via `Main.NewText`.
-- [ ] Round-trip works in singleplayer without freezing the game thread.
-- [ ] Note findings (SDK quirks, API signatures) in `RUNBOOK.md`; tick 1.2.
-- [ ] *If the spike fights back, this is the day to find out — re-scope before S4 if needed.*
+- [x] Confirm tModLoader → Develop Mods detects the .NET 8 SDK (the one tonight's check covered).
+- [x] Minimal mod: read current HP from `Main.LocalPlayer`.
+- [x] Async `HttpClient` POST to a local FastAPI echo stub; print reply via `Main.NewText`.
+- [x] Round-trip works in singleplayer without freezing the game thread.
+- [x] Note findings (SDK quirks, API signatures) in `RUNBOOK.md`; tick 1.2.
 
 ### Phase 1.3 · Python tooling & FastAPI skeleton — `feat/03-python-tooling`
 - [ ] `backend/app/` package tree per `ARCH.md §3` with `__init__.py`.

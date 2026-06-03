@@ -28,7 +28,7 @@ Tenant isolation is enforced by Postgres Row-Level Security; a short-lived JWT c
 
 **Execution Rule:** Always act as a technical planner first. For any non-trivial task, propose a step-by-step plan and wait for approval before writing code. Once approved, write the code.
 
-**Status:** No phases merged yet. **Phase 1.1 · Repo skeleton & Git hygiene in progress.** `deliverables/DECISIONS.md`, `deliverables/ARCH.md`, and `Checklist.md` are drafted and get committed in Phase 1.1. Eval thresholds are `PENDING` until measured in S2 (RAG hit@k) and S6 (red-team).
+**Status:** Phase 1.1 (foundations) merged. Phase 1.2 (tModLoader spike) complete — backend↔client bridge verified end-to-end (live HP read → async POST → in-game render). **Phase 1.3 (Python tooling & FastAPI skeleton) is next**, where `ci.yml` goes live and `backend/app/` gets real code. Eval thresholds remain `PENDING` until S2/S6.
 
 Before suggesting any work, read these files in order:
 1. `Checklist.md` — granular phase-by-phase progress; the source of truth for *what to build next*. **You maintain this file** — update it whenever a phase starts or finishes.
