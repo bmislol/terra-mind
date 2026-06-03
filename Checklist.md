@@ -30,7 +30,7 @@ Goal: a reproducible skeleton that boots clean from a fresh clone, with the risk
 - [x] Commit drafted `deliverables/DECISIONS.md` and `deliverables/ARCH.md`.
 - [x] Create empty `deliverables/{RUNBOOK,EVALS,SECURITY,LICENSES}.md` stubs.
 - [x] `eval_thresholds.yaml` created with placeholder keys (values `PENDING`, filled in S2/S6).
-- [~] Branch protection on `main` configured in GitHub UI.
+- [x] Branch protection on `main` configured in GitHub UI.
 - [x] All on `feat/01-foundations`; PR via template; squash merge; tick 1.1.
 
 ### Phase 1.2 · tModLoader spike — `feat/02-tmodloader-spike`
@@ -42,12 +42,12 @@ Goal: a reproducible skeleton that boots clean from a fresh clone, with the risk
 - [x] Note findings (SDK quirks, API signatures) in `RUNBOOK.md`; tick 1.2.
 
 ### Phase 1.3 · Python tooling & FastAPI skeleton — `feat/03-python-tooling`
-- [ ] `backend/app/` package tree per `ARCH.md §3` with `__init__.py`.
-- [ ] `backend/pyproject.toml` (FastAPI, uvicorn, ruff, mypy, pytest) via `uv`; commit `uv.lock`.
-- [ ] `app/main.py` with `/healthz`.
-- [ ] `tests/test_healthz.py`.
-- [ ] `.github/workflows/ci.yml` (lint/format/type-check/test).
-- [ ] Local CI green; PR; CI green on PR; enable "Require status checks" on `main`; merge; tick 1.3.
+- [x] `backend/app/` package tree per `ARCH.md §3` with `__init__.py`.
+- [x] `backend/pyproject.toml` (FastAPI, uvicorn, ruff, mypy, pytest) via `uv`; commit `uv.lock`.
+- [x] `app/main.py` with `/healthz`.
+- [x] `tests/test_healthz.py`.
+- [x] `.github/workflows/ci.yml` (lint/format/type-check/test).
+- [x] Local CI green; PR; CI green on PR; enable "Require status checks" on `main`; merge; tick 1.3.
 
 ### Phase 1.4 · Compose skeleton — `feat/04-compose-skeleton`
 - [ ] `backend/Dockerfile`.
