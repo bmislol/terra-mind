@@ -106,7 +106,7 @@ GitHub-token patterns from a code-triage context are intentionally omitted — n
 
 ### 7.2 Redaction Test
 
-`tests/test_redaction.py` — mandatory for CI green. Asserts `sk-test-FAKE-not-real` never appears unredacted in log output or trace spans, exercised through a full `/bot/ask` turn.
+`tests/test_redaction.py` — mandatory for CI green. Asserts `sk-ant-api03-FAKE-not-real` (a value matching the Anthropic key pattern) never appears unredacted in log output after passing through `RedactionFilter`. Full end-to-end exercise through `/bot/ask` spans defers to Phase 2+.
 
 ## 8. Guardrails (agent misuse) — headline control
 

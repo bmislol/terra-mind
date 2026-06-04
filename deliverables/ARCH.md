@@ -148,7 +148,7 @@ _Status: design (target flow; phases fill it in)._
 
 ## 6. Authentication, Authorization & Tenancy
 
-_Status: partial (Phase 1.5). Vault secret loading, DB session factory, and ORM models wired. JWT/fastapi-users auth wires in Phase 4.1._
+_Status: partial (Phase 1.6). Vault secret loading, DB session factory, ORM models, structured JSON logging, Langfuse tracing, and redaction wired. JWT/fastapi-users auth wires in Phase 4.1._
 
 **Library:** `fastapi-users[sqlalchemy]` with `BearerTransport` + `JWTStrategy`.
 
@@ -222,7 +222,7 @@ Compose boot sequence:
 
 There is no `modelserver` refuse-to-boot check (no trained model artifact in scope; D-009).
 
-_Phase 1.5: Vault refuse-to-boot implemented (`app/infra/vault.py`). Langfuse refuse-to-boot wires in Phase 1.6. Eval-threshold check deferred to Phase 6.3 (all thresholds `PENDING` until S2/S6)._
+_Phase 1.5: Vault refuse-to-boot implemented (`app/infra/vault.py`). Phase 1.6: Langfuse refuse-to-boot and eval-threshold refuse-to-boot implemented (`app/core/lifespan.py`). Eval-threshold `PENDING` values pass the check intentionally; real numbers fill in during S2/S6._
 
 ## 10. Wiki Scraping & Corpus-Build Contract
 
@@ -262,6 +262,8 @@ _Most numbers are PENDING until the corpus is built and measured on the 15-quest
 | Metadata filtering | `game_version` filter on every query (and a future `content_pack` axis for mods). | RAG phase (D-005) |
 
 ## 12. Tracing and Logging
+
+_Status: implemented (Phase 1.6). All three subsections below are live._
 
 ### 12.1 Tracing
 

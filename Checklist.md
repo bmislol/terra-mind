@@ -67,11 +67,11 @@ Goal: a reproducible skeleton that boots clean from a fresh clone, with the risk
 - [x] `ARCH.md §6/§9`, `SECURITY.md`; tick 1.5.
 
 ### Phase 1.6 · Langfuse + logging + redaction stub — `feat/06-langfuse-logging`
-- [ ] `app/core/logging.py` (JSON), `app/infra/tracing.py`, `app/api/middleware.py` (request_id/trace_id/tenant_id contextvars).
-- [ ] Refuse-to-boot if Langfuse unreachable.
-- [ ] `/healthz` returns `X-Request-ID`; logs are structured JSON; trace visible in Langfuse UI.
-- [ ] `app/infra/redaction.py` stub + `tests/test_logging.py` + redaction test.
-- [ ] `ARCH.md §12`, `DECISIONS` (Langfuse config); tick 1.6.
+- [x] `app/core/logging.py` (JSON), `app/infra/tracing.py`, `app/api/middleware.py` (request_id/trace_id/tenant_id contextvars).
+- [x] Refuse-to-boot if Langfuse unreachable.
+- [x] `/healthz` returns `X-Request-ID`; logs are structured JSON; trace visible in Langfuse UI.
+- [x] `app/infra/redaction.py` stub + `tests/test_logging.py` + redaction test.
+- [x] `ARCH.md §12`, `DECISIONS` (Langfuse config); tick 1.6.
 
 ---
 

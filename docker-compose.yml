@@ -100,9 +100,20 @@ services:
       NEXTAUTH_URL: http://localhost:${LANGFUSE_PORT:-3001}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
-      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
       SALT: ${LANGFUSE_SALT}
       HOSTNAME: "0.0.0.0"
+      # Seeds a default org, project, user, and API keys on fresh volume init.
+      # All six vars must be set together — Langfuse skips seeding if any is absent.
+      # Values must match LANGFUSE_PUBLIC_KEY / LANGFUSE_SDK_SECRET_KEY in the api service.
+      LANGFUSE_INIT_ORG_ID: terra-mind-org
+      LANGFUSE_INIT_ORG_NAME: terra-mind
+      LANGFUSE_INIT_PROJECT_ID: terra-mind-project
+      LANGFUSE_INIT_PROJECT_NAME: terra-mind
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SDK_SECRET_KEY}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL}
+      LANGFUSE_INIT_USER_NAME: admin
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/public/health || exit 1"]
       interval: 10s
@@ -132,6 +143,8 @@ services:
         condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
+      langfuse:
+        condition: service_healthy
     ports:
       - "${API_PORT:-8000}:8000"
     environment:
@@ -139,6 +152,13 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       VAULT_ADDR: http://vault:8200
       VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN_ID}
+      # Project SDK keys — must match LANGFUSE_INIT_PROJECT_* in the langfuse service.
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SDK_SECRET_KEY}
+      LANGFUSE_HOST: http://langfuse:3000
+      EVAL_THRESHOLDS_PATH: /app/eval_thresholds.yaml
+    volumes:
+      - ./eval_thresholds.yaml:/app/eval_thresholds.yaml:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
       interval: 10s
