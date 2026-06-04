@@ -1,0 +1,67 @@
+name: eval-rag
+
+# Manual-dispatch only. The RAG gate needs a live pgvector DB with the wiki corpus
+# indexed; building/indexing that on every PR would add fragile minutes per run.
+# The maintainer runs this before merging any PR that touches app/rag/, the golden
+# set, or eval_thresholds.yaml. PR-time CI skips eval tests (they are marked -m eval).
+#
+# SCAFFOLD: the corpus-load step is finalized in Phase 2.4 once build_corpus.py and the
+# golden set exist. Until then this workflow is present but not wired to real data.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  eval-rag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: terramind
+          POSTGRES_PASSWORD: terramind-dev-password
+          POSTGRES_DB: terramind
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U terramind -d terramind"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "backend/uv.lock"
+
+      - name: Install dependencies
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: Run migrations + index corpus (finalized in Phase 2.4)
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://terramind:terramind-dev-password@localhost:5432/terramind
+        run: |
+          if [ -d alembic ]; then
+            uv run alembic upgrade head
+            # TODO (Phase 2.4): load a small committed eval corpus fixture, or build_corpus --version <v>
+          else
+            echo "Phase 1.5 not reached: no alembic migrations yet — skipping (scaffold)."
+          fi
+
+      - name: Run RAG eval gate
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://terramind:terramind-dev-password@localhost:5432/terramind
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -f tests/test_eval_rag.py ]; then
+            uv run pytest tests/test_eval_rag.py -m eval -v -s --tb=short
+          else
+            echo "Phase 2.4 not reached: no RAG eval tests yet — skipping (scaffold)."
+          fi

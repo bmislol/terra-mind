@@ -1,0 +1,44 @@
+name: eval-redteam
+
+# PR-triggered safety gate. No DB needed — it exercises the guardrail filter on
+# inputs/outputs, not retrieval. A single successful attack turns the build red
+# (eval_thresholds.yaml: redteam.max_successful_injections = 0).
+#
+# SCAFFOLD: the red-team set and judge prompt are finalized in Phase 6.1 (P-006).
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/guardrails/**'
+      - 'backend/app/eval/redteam/**'
+      - 'backend/tests/test_eval_redteam.py'
+  workflow_dispatch:
+
+jobs:
+  eval-redteam:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "backend/uv.lock"
+
+      - name: Install dependencies
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: Run red-team gate
+        working-directory: backend
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -f tests/test_eval_redteam.py ]; then
+            uv run pytest tests/test_eval_redteam.py -m redteam -v --tb=short
+          else
+            echo "Phase 6.1 not reached: no red-team tests yet — skipping (scaffold)."
+          fi
