@@ -50,12 +50,12 @@ Goal: a reproducible skeleton that boots clean from a fresh clone, with the risk
 - [x] Local CI green; PR; CI green on PR; enable "Require status checks" on `main`; merge; tick 1.3.
 
 ### Phase 1.4 · Compose skeleton — `feat/04-compose-skeleton`
-- [ ] `backend/Dockerfile`.
-- [ ] `docker-compose.yml`: `db` (pgvector/pg16), `redis`, `vault`, `vault-init`, `langfuse`, `migrate`, `api`, `frontend-admin` + `frontend-user` stubs. (No minio/modelserver/widget/host — D-014, D-009, D-011.)
-- [ ] `.env.example` with all non-secret config + secret placeholders.
-- [ ] `docker compose up --build` → every service healthy; each `/healthz` 200.
-- [ ] `down -v && up --build` → clean fresh boot second time.
-- [ ] `RUNBOOK.md §1` (startup) + `ARCH.md §2` sanity-checked; tick 1.4.
+- [x] `backend/Dockerfile`.
+- [x] `docker-compose.yml`: `db` (pgvector/pg16), `redis`, `vault`, `vault-init`, `langfuse`, `migrate`, `api`, `frontend-admin` + `frontend-user` stubs. (No minio/modelserver/widget/host — D-014, D-009, D-011.)
+- [x] `.env.example` with all non-secret config + secret placeholders.
+- [x] `docker compose up --build` → every service healthy; each `/healthz` 200.
+- [x] `down -v && up --build` → clean fresh boot second time.
+- [x] `RUNBOOK.md §1` (startup) + `ARCH.md §2` sanity-checked; tick 1.4.
 
 ### Phase 1.5 · Vault + Alembic + RLS scaffolding — `feat/05-vault-alembic-rls`
 - [ ] `app/core/config.py`, `app/core/lifespan.py`, `app/infra/vault.py`.
