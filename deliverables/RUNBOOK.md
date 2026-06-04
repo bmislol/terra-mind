@@ -67,6 +67,22 @@ docker compose start langfuse && sleep 10 && docker compose up -d api
 
 If Vault is restarted in dev mode, re-run `vault-init` (`docker compose up -d --force-recreate vault-init`) to re-seed dev secrets. Dev-only concern; production Vault uses persistent storage.
 
+**postgres-init.sh only runs on fresh volumes.** `backend/scripts/postgres-init.sh` creates the `terramind_app` role via Docker's `/docker-entrypoint-initdb.d/` mechanism. This script runs **once**, when the Postgres data volume is first created. `docker compose restart db` does NOT re-execute it. If you need to recreate the role (e.g. after changing `APP_DB_PASSWORD`), run `docker compose down -v && docker compose up --build` to wipe and reinitialise the volume.
+
+**RLS proof (as terramind_app):**
+```bash
+# After `docker compose up --build` with two tenant rows inserted:
+docker compose exec db psql -U terramind_app -d terramind <<'SQL'
+BEGIN;
+SET LOCAL app.current_tenant_id = '<tenant_a_uuid>';
+SELECT id FROM sessions;   -- expect: only Tenant A rows
+SET LOCAL app.current_tenant_id = '<tenant_b_uuid>';
+SELECT id FROM sessions;   -- expect: only Tenant B rows
+COMMIT;
+SQL
+# Use plain SET (session-scoped) for a quick manual check outside a transaction.
+```
+
 ## 3. Bootstrap the First Operator
 
 _(Phase 4.1.)_ Runs host-side against `DATABASE_URL`; does not go through Vault or the API. Run once after `migrate` has exited 0.

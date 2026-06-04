@@ -3,7 +3,13 @@ name = "terra-mind-backend"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.13",
+    "asyncpg>=0.29",
     "fastapi>=0.115",
+    "hvac>=2.3",
+    "pgvector>=0.3",
+    "pydantic-settings>=2.0",
+    "sqlalchemy[asyncio]>=2.0",
     "uvicorn[standard]>=0.30",
 ]
 
@@ -33,6 +39,12 @@ select = ["E", "F", "I", "UP"]
 [tool.mypy]
 strict = true
 python_version = "3.12"
+exclude = ["app/db/migrations/versions/"]
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["hvac.*", "pgvector.*", "alembic.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

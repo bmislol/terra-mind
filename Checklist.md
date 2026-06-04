@@ -58,13 +58,13 @@ Goal: a reproducible skeleton that boots clean from a fresh clone, with the risk
 - [x] `RUNBOOK.md §1` (startup) + `ARCH.md §2` sanity-checked; tick 1.4.
 
 ### Phase 1.5 · Vault + Alembic + RLS scaffolding — `feat/05-vault-alembic-rls`
-- [ ] `app/core/config.py`, `app/core/lifespan.py`, `app/infra/vault.py`.
-- [ ] `scripts/vault-init.sh`; seeds `anthropic.api_key`, `jwt.signing_key`.
-- [ ] Refuse-to-boot if Vault unreachable; `tests/test_refuse_to_boot.py`.
-- [ ] ORM models: `tenants`, `sessions`, `messages`, `rag_chunks`, `audit_log` (no `memory_long` — D-010).
-- [ ] Alembic init (async); first migration; `CREATE EXTENSION vector` added; **RLS policies** on tenant-scoped tables.
-- [ ] `down -v && up --build`: vault-init seeds, migrate runs, tables + `vector` ext present; RLS verified (Tenant A can't read Tenant B).
-- [ ] `ARCH.md §6/§9`, `SECURITY.md`; tick 1.5.
+- [x] `app/core/config.py`, `app/core/lifespan.py`, `app/infra/vault.py`.
+- [x] `scripts/vault-init.sh`; seeds `anthropic.api_key`, `jwt.signing_key`.
+- [x] Refuse-to-boot if Vault unreachable; `tests/test_refuse_to_boot.py`.
+- [x] ORM models: `tenants`, `sessions`, `messages`, `rag_chunks`, `audit_log` (no `memory_long` — D-010).
+- [x] Alembic init (async); first migration; `CREATE EXTENSION vector` added; **RLS policies** on tenant-scoped tables.
+- [x] `down -v && up --build`: vault-init seeds, migrate runs, tables + `vector` ext present; RLS verified (Tenant A can't read Tenant B).
+- [x] `ARCH.md §6/§9`, `SECURITY.md`; tick 1.5.
 
 ### Phase 1.6 · Langfuse + logging + redaction stub — `feat/06-langfuse-logging`
 - [ ] `app/core/logging.py` (JSON), `app/infra/tracing.py`, `app/api/middleware.py` (request_id/trace_id/tenant_id contextvars).
