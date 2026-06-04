@@ -112,6 +112,12 @@ Architectural decision log for **terra-mind**. Every significant choice lives he
 
 **Revised 2026-06-03:** Target version confirmed as **Terraria 1.4.4.9**. tModLoader v2026.4.3.0 (current stable) targets 1.4.4.9; current bare Terraria desktop is 1.4.5, but the mod runs on tModLoader which lags bare Terraria — this confirms the original rationale. The corpus `game_version` tag is `1.4.4.9`. "Confirm before scraping" is resolved; no further version discovery needed.
 
+### D-017 — audit_log RLS exemption + terramind_app role split
+**Status:** Locked (2026-06-04)
+**Choice:** (a) `audit_log` has RLS **disabled**; access is enforced by the `is_superuser` gate in the service layer. (b) The API connects as `terramind_app` (non-superuser, non-owner); `terramind` (superuser owner) is used only by `migrate`.
+**Why:** (a) `audit_log` is cross-tenant by design — an operator must read rows across all tenants (SECURITY.md §6). A row-level policy would require a DB-level operator concept (a third Postgres role or a session variable mirroring `is_superuser`) that duplicates the service layer's role model for no isolation benefit. The service layer `current_active_superuser` dependency is the correct control boundary. (b) A superuser connection bypasses RLS unconditionally regardless of `ENABLE ROW LEVEL SECURITY` or `FORCE ROW LEVEL SECURITY` — the only correct fix is a non-superuser role. `terramind_app` is created by `postgres-init.sh` on fresh volume init; `migrate` connects as `terramind` to create tables and grant, then `api` connects as `terramind_app`.
+**Number / evidence:** 2 Postgres roles; 2 tables with RLS (`sessions`, `messages`); 1 intentional RLS exemption (`audit_log`).
+
 ---
 
 ## Pending Decisions
@@ -135,3 +141,4 @@ Open questions we know we must answer. Each graduates to a `D-NNN` once settled,
 
 - **2026-06-03 · D-016:** Confirmed Terraria target version as 1.4.4.9 (tModLoader v2026.4.3.0). Corpus `game_version` tag locked to `1.4.4.9`. "Confirm before scraping" placeholder resolved.
 - **2026-06-04 · D-007:** Locked Vault KV paths to `secret/terra-mind/anthropic` (`api_key`) and `secret/terra-mind/jwt` (`signing_key`). Logical dotted names in original decision now mapped to concrete physical paths seeded by vault-init.
+- **2026-06-04 · D-017 (new):** audit_log RLS exemption and terramind_app role split locked. API connects as terramind_app (non-superuser); migrate connects as terramind (owner). audit_log has no RLS — operator-gated at the service layer.

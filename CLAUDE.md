@@ -28,7 +28,7 @@ Tenant isolation is enforced by Postgres Row-Level Security; a short-lived JWT c
 
 **Execution Rule:** Always act as a technical planner first. For any non-trivial task, propose a step-by-step plan and wait for approval before writing code. Once approved, write the code.
 
-**Status:** Phase 1.1 (foundations) merged. Phase 1.2 (tModLoader spike) complete — backend↔client bridge verified end-to-end (live HP read → async POST → in-game render). **Phase 1.3 (Python tooling & FastAPI skeleton) is next**, where `ci.yml` goes live and `backend/app/` gets real code. Eval thresholds remain `PENDING` until S2/S6.
+**Status:** Phases 1.1–1.4 merged. **Phase 1.5 (Vault + Alembic + RLS) complete** — Vault secret loading, async SQLAlchemy, five ORM models, RLS policies on `sessions`/`messages`, refuse-to-boot test green. Pending manual boot test (`down -v && up --build`, RLS proof as `terramind_app`). **Phase 1.6 (Langfuse + logging + redaction)** is next. Eval thresholds remain `PENDING` until S2/S6.
 
 Before suggesting any work, read these files in order:
 1. `Checklist.md` — granular phase-by-phase progress; the source of truth for *what to build next*. **You maintain this file** — update it whenever a phase starts or finishes.

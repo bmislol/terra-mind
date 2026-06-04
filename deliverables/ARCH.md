@@ -148,7 +148,7 @@ _Status: design (target flow; phases fill it in)._
 
 ## 6. Authentication, Authorization & Tenancy
 
-_Status: design (Phase: auth)._
+_Status: partial (Phase 1.5). Vault secret loading, DB session factory, and ORM models wired. JWT/fastapi-users auth wires in Phase 4.1._
 
 **Library:** `fastapi-users[sqlalchemy]` with `BearerTransport` + `JWTStrategy`.
 
@@ -221,6 +221,8 @@ Compose boot sequence:
 - Any committed eval threshold in `eval_thresholds.yaml` is zero or missing.
 
 There is no `modelserver` refuse-to-boot check (no trained model artifact in scope; D-009).
+
+_Phase 1.5: Vault refuse-to-boot implemented (`app/infra/vault.py`). Langfuse refuse-to-boot wires in Phase 1.6. Eval-threshold check deferred to Phase 6.3 (all thresholds `PENDING` until S2/S6)._
 
 ## 10. Wiki Scraping & Corpus-Build Contract
 

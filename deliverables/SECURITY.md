@@ -43,6 +43,8 @@ Every tenant-scoped table (`sessions`, `messages`, `audit_log`, player preferenc
 
 - A repository query issued under Tenant A's context **cannot** read or write Tenant B's rows — enforced by Postgres, not application `WHERE` clauses.
 - The **wiki corpus (`rag_chunks`) is intentionally NOT tenant-scoped** — it is shared public knowledge, version-tagged, queried by `game_version` (D-005). This is the one deliberately shared table; its absence of `tenant_id` is a decision, not a gap.
+- **`audit_log` is intentionally NOT RLS-protected** — it is cross-tenant by design: an operator must be able to read rows across all tenants. Isolation is role-based (operator vs player), not row-based. The `is_superuser` gate in the service layer is the control; a player token never reaches the `GET /admin/audit-log` handler. See D-017.
+- **`api` connects as `terramind_app`** (non-superuser, non-owner) so RLS is unconditionally enforced. `terramind` (superuser owner) is used only by `migrate`. This role split is the mechanism that makes RLS non-bypassable; a superuser connection would bypass RLS regardless of policies.
 - **Proof (Phase 7.1):** a live demo with two tenants showing Tenant A's `/bot` history is invisible to Tenant B, plus a test (`tests/test_rls_isolation.py`) asserting a cross-tenant read returns nothing.
 
 **Open question (P-005):** what identity the singleplayer mod presents to `POST /client/token` (portal-issued account token vs per-install UUID vs Steam ID) determines how strong this isolation is in practice. Resolved in the auth phase and documented as a `D-NNN`.

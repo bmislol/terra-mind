@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 
-app = FastAPI()
+from app.core.lifespan import lifespan
+
+app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/healthz")
