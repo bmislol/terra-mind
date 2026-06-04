@@ -54,7 +54,9 @@ Architectural decision log for **terra-mind**. Every significant choice lives he
 **Why:** No secrets in git, ever. Refuse-to-boot if Vault is unreachable (D-015). Smaller secret set than Week 7 — no embedding-API key, since MiniLM is local.
 **Number / evidence:** 2 secrets; redaction test proves no secret leaks to logs.
 
-**Revised 2026-06-04:** Vault KV namespace locked to `secret/terra-mind/{anthropic,jwt}`. Fields: `api_key` (anthropic key) and `signing_key` (JWT key). These are the exact paths seeded by `vault-init` in Phase 1.4; `app/infra/vault.py` (Phase 1.5) must read from these paths. The original dotted notation (`anthropic.api_key`, `jwt.signing_key`) referred to logical names, not Vault paths — this revision makes the physical paths unambiguous.
+**Revised 2026-06-04 (Phase 1.4):** Vault KV namespace locked to `secret/terra-mind/{anthropic,jwt}`. Fields: `api_key` (anthropic key) and `signing_key` (JWT key). These are the exact paths seeded by `vault-init` in Phase 1.4; `app/infra/vault.py` (Phase 1.5) must read from these paths. The original dotted notation (`anthropic.api_key`, `jwt.signing_key`) referred to logical names, not Vault paths — this revision makes the physical paths unambiguous.
+
+**Revised 2026-06-04 (Phase 1.6):** Langfuse credentials (`LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SDK_SECRET_KEY`) come from env, not Vault. These are self-hosted infrastructure credentials (project API keys seeded via `LANGFUSE_INIT_PROJECT_*`), not application secrets like the Anthropic key. Adding them to Vault would create a circular dependency (Vault seeder needs Langfuse up; Langfuse needs to be healthy before Vault seeds) and provides no security benefit in a dev-local stack.
 
 ### D-008 — Retrieval strategy
 **Status:** Locked (2026-06-03)
@@ -142,3 +144,4 @@ Open questions we know we must answer. Each graduates to a `D-NNN` once settled,
 - **2026-06-03 · D-016:** Confirmed Terraria target version as 1.4.4.9 (tModLoader v2026.4.3.0). Corpus `game_version` tag locked to `1.4.4.9`. "Confirm before scraping" placeholder resolved.
 - **2026-06-04 · D-007:** Locked Vault KV paths to `secret/terra-mind/anthropic` (`api_key`) and `secret/terra-mind/jwt` (`signing_key`). Logical dotted names in original decision now mapped to concrete physical paths seeded by vault-init.
 - **2026-06-04 · D-017 (new):** audit_log RLS exemption and terramind_app role split locked. API connects as terramind_app (non-superuser); migrate connects as terramind (owner). audit_log has no RLS — operator-gated at the service layer.
+- **2026-06-04 · D-007 (Phase 1.6 addendum):** Langfuse credentials come from env, not Vault — circular dependency and no security benefit for a dev-local stack. SDK keys seeded via `LANGFUSE_INIT_PROJECT_*` compose vars.
