@@ -54,6 +54,8 @@ Architectural decision log for **terra-mind**. Every significant choice lives he
 **Why:** No secrets in git, ever. Refuse-to-boot if Vault is unreachable (D-015). Smaller secret set than Week 7 — no embedding-API key, since MiniLM is local.
 **Number / evidence:** 2 secrets; redaction test proves no secret leaks to logs.
 
+**Revised 2026-06-04:** Vault KV namespace locked to `secret/terra-mind/{anthropic,jwt}`. Fields: `api_key` (anthropic key) and `signing_key` (JWT key). These are the exact paths seeded by `vault-init` in Phase 1.4; `app/infra/vault.py` (Phase 1.5) must read from these paths. The original dotted notation (`anthropic.api_key`, `jwt.signing_key`) referred to logical names, not Vault paths — this revision makes the physical paths unambiguous.
+
 ### D-008 — Retrieval strategy
 **Status:** Locked (2026-06-03)
 **Choice:** **Dense-only first.** Add BM25/hybrid (RRF) **only if** dense underperforms on the golden set, recorded as a number-backed escalation. **No HyDE.**
@@ -132,3 +134,4 @@ Open questions we know we must answer. Each graduates to a `D-NNN` once settled,
 ## Revision Log
 
 - **2026-06-03 · D-016:** Confirmed Terraria target version as 1.4.4.9 (tModLoader v2026.4.3.0). Corpus `game_version` tag locked to `1.4.4.9`. "Confirm before scraping" placeholder resolved.
+- **2026-06-04 · D-007:** Locked Vault KV paths to `secret/terra-mind/anthropic` (`api_key`) and `secret/terra-mind/jwt` (`signing_key`). Logical dotted names in original decision now mapped to concrete physical paths seeded by vault-init.

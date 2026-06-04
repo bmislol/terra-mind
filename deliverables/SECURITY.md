@@ -51,7 +51,9 @@ Every tenant-scoped table (`sessions`, `messages`, `audit_log`, player preferenc
 
 `fastapi-users` with `BearerTransport` + `JWTStrategy`.
 
-- **JWT signing key** — resolved from Vault at lifespan startup (`secrets.jwt.signing_key`); read from `app.state` at request time; never in env, never logged, never committed.
+- **JWT signing key** — resolved from Vault at lifespan startup. Concrete path: mount `secret`, path `terra-mind/jwt`, field `signing_key` (`secret/terra-mind/jwt` → `signing_key`). Read from `app.state` at request time; never in env, never logged, never committed.
+- **Anthropic API key** — Vault path: `secret/terra-mind/anthropic` → field `api_key`. Resolved by the same startup call.
+- **Path contract:** these are the exact paths `vault-init` seeds (Phase 1.4). `app/infra/vault.py` in Phase 1.5 must read from `secret/terra-mind/jwt` and `secret/terra-mind/anthropic` — any divergence breaks startup.
 - **Algorithm** — `HS256` (dev key seeded by `vault-init.sh`; a real deployment replaces it with a 256-bit random key).
 - **Token payload** — carries `tenant_id` (UUID) and role; no email/PII in the body.
 - **Registration** — players **self-register** via the portal (`POST /auth/register`). **No email verification, no password reset** (cut; zero grading value, live-demo failure risk).
