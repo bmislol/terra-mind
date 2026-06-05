@@ -226,52 +226,121 @@ _Phase 1.5: Vault refuse-to-boot implemented (`app/infra/vault.py`). Phase 1.6: 
 
 ## 10. Wiki Scraping & Corpus-Build Contract
 
-_Status: Phase 2.1 implemented (`feat/07-wiki-scrape`)._
+_Status: Phase 2.1 implemented (`feat/07-wiki-scrape`). Phase 2.2 implemented (`feat/08-corpus-build`)._
 
 Terra-mind's offline pipeline is the wiki ingest, not model training.
 
-The corpus is built **offline** by scripts, never from a request:
+The corpus is built **offline** by three host-side scripts in sequence, never from a request:
 
 ```text
-backend/scripts/scrape_wiki.py     # MediaWiki API, rate-limited, resumable — writes data/raw/<version>/
-backend/scripts/build_corpus.py    # chunk → embed (MiniLM, local) → upsert into pgvector, tagged game_version
-backend/data/raw/<game_version>/   # gitignored raw snapshot
-backend/data/corpus/<game_version>/# gitignored built artifacts / manifest
+backend/scripts/scrape_wiki.py      # MediaWiki API — writes data/raw/<version>/pages/*.json
+backend/scripts/scrape_cargo.py     # Cargo API (Items + Recipes) — writes data/raw/<version>/cargo/
+backend/scripts/build_corpus.py     # chunk → embed (MiniLM) → upsert into pgvector, tagged game_version
+backend/data/raw/<game_version>/    # gitignored raw snapshot
 ```
 
-**Invocation:** `uv run python -m scripts.scrape_wiki --version 1.4.4.9 [--force]`
+**Invocation sequence (RUNBOOK.md §4):**
+```
+uv run python -m scripts.scrape_wiki  --version 1.4.4.9
+uv run python -m scripts.scrape_cargo --version 1.4.4.9
+uv run python -m scripts.build_corpus --version 1.4.4.9
+```
 
-**API base:** `https://terraria.wiki.gg/api.php` · Namespace: 0 (Main) only · Format: wikitext (not HTML) · Batch: 50 pages/request · Rate: 1 batch/second
+---
 
-**Discovery runs on every invocation** (cost: ~10 API calls, ~10 s). After discovery, a symmetric diff classifies pages as new / unchanged / disappeared. Disappeared pages are moved to `.checkpoint/orphaned/` and excluded from the manifest. The operator sees `New: N  Unchanged: M  Disappeared: K` before any fetch begins.
+### scrape_wiki.py (Phase 2.1)
 
-**Resumability:** per-page atomic writes (`os.replace`); if the script crashes mid-fetch, re-invocation skips already-written `pages/<page_id>.json` files. Failed pages (retry-exhausted) are written to `.checkpoint/failed.jsonl`; the manifest is not written until the corpus is complete.
+**API base:** `https://terraria.wiki.gg/api.php` · Namespace: 0 (Main) only · Format: wikitext · Batch: 50 pages/request · Rate: 1 batch/second
 
-**Per-page schema** (`pages/<page_id>.json`): `page_id`, `title`, `namespace`, `revision_id`, `timestamp`, `source_url` (from API `canonicalurl`), `wikitext`, `is_disambiguation`. This is the Phase 2.1 → 2.2 contract; do not change after merge without a revision note.
+**Discovery runs on every invocation** (cost: ~10 API calls, ~10 s). Symmetric diff: new / unchanged / disappeared. Disappeared pages moved to `.checkpoint/orphaned/`. Print `New: N  Unchanged: M  Disappeared: K` before fetching.
 
-**Scrape manifest** (`manifest.json`): `game_version`, `source`, `api_base`, `scraped_at`, `page_count`, `raw_sha256`.
-Fields `chunk_count`, `embedding_model`, `embedding_dim` are written by Phase 2.2 (`build_corpus.py`).
-`raw_sha256` = SHA-256 over all page wikitexts concatenated in ascending `page_id` order (separator: `\x00` between fields and entries). Stable across schema additions; changes only when wiki content changes. Phase 5.2's re-rag button keys on this field.
+**Resumability:** per-page atomic writes (`os.replace`); crashed runs resume from existing `pages/<page_id>.json` files. Retry-exhausted pages → `.checkpoint/failed.jsonl`; no manifest write until complete.
 
-**Licensing:** scraper User-Agent `terra-mind-research/0.1 (…)`, robots.txt checked at startup, attribution in `LICENSES.md §2`.
+**Per-page schema** (`pages/<page_id>.json`): `page_id`, `title`, `namespace`, `revision_id`, `timestamp`, `source_url` (from API `canonicalurl`), `wikitext`, `is_disambiguation`. This is the 2.1 → 2.2 contract; do not change after merge without a revision note.
+
+---
+
+### scrape_cargo.py (Phase 2.2)
+
+**Tables:** `Items` (6,233 rows, 32 fields fetched) and `Recipes` (4,221 rows, 7 fields fetched). No other tables — NPCs, Drops, History, etc. are out of scope (see DECISIONS.md D-018).
+
+**Pagination:** `action=cargoquery&limit=500&offset=N` — ~13 requests for Items, ~9 for Recipes. Rate: 1 request/second.
+
+**Resumability:** if `cargo/items.json` and `cargo/recipes.json` both exist and `manifest.json` already has `cargo_raw_sha256`, the script exits cleanly (idempotent). `--force` clears `cargo/` and re-fetches. Partial or failed fetches: non-zero exit, no manifest write.
+
+**Output layout:**
+```
+data/raw/1.4.4.9/
+    cargo/
+        items.json               # JSON array of Items Cargo rows
+        recipes.json             # JSON array of Recipes Cargo rows
+        orphan_recipes.jsonl     # Recipes rows with no matching wiki page
+```
+
+**Join keys:**
+- `items.json`: `row["_pageName"]` matches `page["title"]` exactly.
+- `recipes.json`: `row["result"]` matches `page["title"]`. (`_pageName` is the recipe register page, not the item page — do not use it as the join key.)
+
+---
+
+### Manifest (`manifest.json`) — full schema
+
+```json
+{
+  "game_version":       "1.4.4.9",
+  "source":             "https://terraria.wiki.gg",
+  "api_base":           "https://terraria.wiki.gg/api.php",
+  "scraped_at":         "<ISO-8601>",
+  "page_count":         5157,
+  "raw_sha256":         "<hex>",
+  "cargo_scraped_at":   "<ISO-8601>",
+  "cargo_raw_sha256":   "<hex>",
+  "cargo_table_counts": {"items": 6233, "recipes": 4221},
+  "chunk_count":        22173,
+  "embedding_model":    "sentence-transformers/all-MiniLM-L6-v2",
+  "embedding_dim":      384
+}
+```
+
+`raw_sha256` — SHA-256 over all page wikitexts in ascending `page_id` order. Written by `scrape_wiki.py`.
+`cargo_raw_sha256` — SHA-256 over `items.json` bytes + `\x00` + `recipes.json` bytes. Written by `scrape_cargo.py`.
+`chunk_count`, `embedding_model`, `embedding_dim` — written by `build_corpus.py`.
+All three scripts fail loudly and leave the manifest in a deterministically incomplete state if they crash.
+
+---
+
+### build_corpus.py (Phase 2.2)
+
+**Inputs:** `pages/*.json` (wikitext) + `cargo/items.json` + `cargo/recipes.json` + existing `manifest.json` with `cargo_raw_sha256`.
+
+**Chunk types per page (in order of chunk_index):**
+1. `section="stats"` — Cargo Items synthesis (all numeric stats from Cargo; use-time label from wiki-sourced thresholds ≤8/9–20/21–25/26–30/31–35/36–45/46–55/≥56).
+2. `section="recipe"` — one per Cargo Recipes row matching `result == page_title`.
+3. `section="stats"` — NPC template synthesis from `{{npc infobox}}` (Classic-mode damage/defense via `{{modes}}` first-positional; literal `immune`, `environment`, `ai`).
+4. `section="drops"` — NPC drop DSL synthesis from numbered infobox params.
+5. `section="intro"` + `section=<heading>` — prose sections via mwparserfromhell `strip_code()`, structural split at L2 headings, sliding-window fallback at 180-token target.
+
+**Idempotency:** `INSERT … ON CONFLICT (page_id, chunk_index, game_version) DO UPDATE SET …` — re-runs update in place without duplicates.
+
+**Licensing:** wiki content is CC BY-NC-SA 4.0. `source_url` (from `canonicalurl`) is stored in every `rag_chunks` row for per-chunk attribution. Cargo data is the same CC BY-NC-SA 4.0 content served through a different API endpoint.
 
 The trained-classifier artifact contract (SHA-pinned weights, model card, refuse-to-boot on mismatch) is **deferred to future work** along with the model itself (D-009).
 
 ## 11. RAG Architecture
 
-_Most numbers are PENDING until the corpus is built and measured on the 15-question golden set; they are filled, not guessed (D-003 rule)._
+_Corpus numbers filled from the Phase 2.2 build run (2026-06-05). Retrieval numbers (hit@k, latency) remain PENDING until Phase 2.4 measures them against the 15-question golden set._
 
-| Concern | Choice | Filled by |
+| Concern | Choice | Status |
 |---|---|---|
-| Corpus | Scraped Terraria wiki (vanilla), tagged by `game_version`. Shared across tenants. Page/chunk counts PENDING. | corpus phase (D-005) |
-| Source / ingest | `terraria.wiki.gg` via the MediaWiki API (not HTML scraping); rate-limited, resumable. | corpus phase (D-016) |
-| Embedding model | `all-MiniLM-L6-v2`, 384-dim, local. `bge-small-en-v1.5` is a drop-in re-embed if quality needs it. | corpus phase (D-004) |
-| Chunking strategy | Structural: split at wiki section headings; keep infobox / item-stat blocks intact; sliding-window fallback (size/overlap PENDING). | corpus phase (P-001) |
-| Vector store | pgvector `rag_chunks` — `vector(384)`, index type + params PENDING, metadata incl. `game_version`. | corpus phase (P-002, D-005) |
-| Retrieval | **Dense-only first.** Baseline hit@k PENDING. | RAG phase (D-008) |
+| Corpus | Scraped Terraria wiki (vanilla), tagged by `game_version`. Shared across tenants. **5,157 pages scraped; 22,173 chunks embedded** (4,534 pages produced ≥1 chunk; 623 empty after stripping). | D-005, measured |
+| Source / ingest | `terraria.wiki.gg` via the MediaWiki API (not HTML scraping) + Cargo API (Items + Recipes); rate-limited, resumable. | D-016, Phase 2.1–2.2 |
+| Embedding model | `all-MiniLM-L6-v2`, **384-dim**, local. `bge-small-en-v1.5` is a drop-in re-embed if quality demands it. | D-004, locked |
+| Chunking strategy | **Hybrid structural + sliding-window + Cargo synthesis.** 180-token target, 30-token overlap, 20-token min. 29 distinct section labels (normalised; non-English headings → `"misc"`). Details: D-018. | D-018 (P-001 graduated) |
+| Vector store | pgvector `rag_chunks` — `vector(384)`. **HNSW index, m=16, ef_construction=64, `vector_cosine_ops`.** | D-019 (P-002 graduated) |
+| Retrieval | **Dense-only first.** Baseline hit@k PENDING (Phase 2.4). | D-008, RAG phase |
 | Hybrid (escalation) | BM25 + RRF added **only if** dense underperforms, recorded as a number-backed delta. | conditional (P-007) |
 | Query transformation | **None** — HyDE rejected on latency grounds for live advice. | n/a (D-008) |
-| Metadata filtering | `game_version` filter on every query (and a future `content_pack` axis for mods). | RAG phase (D-005) |
+| Metadata filtering | `game_version` filter on every query (and a future `content_pack` axis for mods). | D-005, RAG phase |
 
 ## 12. Tracing and Logging
 

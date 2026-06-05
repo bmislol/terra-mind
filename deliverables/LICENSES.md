@@ -17,6 +17,7 @@ terra-mind source code: **MIT** (set on the repository).
 - **Local cache:** raw scrape stored at `backend/data/raw/<version>/` — gitignored, not committed.
 - **Scraper User-Agent:** `terra-mind-research/0.1 (Terraria AI companion, academic; https://github.com/bmislol/terra-mind)`
 - **robots.txt:** checked at startup; scraper aborts if `/api.php` is disallowed. Rate: 1 batch/second (50 pages/batch).
+- **Cargo data:** `scrape_cargo.py` fetches item stats and recipes via the Cargo API (`action=cargoquery`) on the same `terraria.wiki.gg` host. Cargo data is the same wiki content served through a different API endpoint and carries the same **CC BY-NC-SA 4.0** license. No additional attribution beyond the per-page `source_url` already stored in `rag_chunks` is required.
 
 > **⚠️ License implication — read before any commercial framing.** CC BY-NC-SA 4.0 is **NonCommercial** and **ShareAlike**. For this academic submission (non-commercial, attributed) it is fine. But:
 > - terra-mind **cannot be commercialized** as-is while its answers are derived from this corpus.

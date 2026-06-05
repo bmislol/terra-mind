@@ -259,3 +259,9 @@ data/corpus/
 Thumbs.db
 
 agent.md
+
+# Scraped corpus and built artifacts (Phase 2.1+; re-derivable from scrape_wiki.py + scrape_cargo.py)
+backend/data/
+
+# Local backup tarball
+*.tar.gz
