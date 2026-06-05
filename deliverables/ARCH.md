@@ -226,22 +226,34 @@ _Phase 1.5: Vault refuse-to-boot implemented (`app/infra/vault.py`). Phase 1.6: 
 
 ## 10. Wiki Scraping & Corpus-Build Contract
 
-Terra-mind's offline pipeline is the wiki ingest, not model training._
+_Status: Phase 2.1 implemented (`feat/07-wiki-scrape`)._
+
+Terra-mind's offline pipeline is the wiki ingest, not model training.
 
 The corpus is built **offline** by scripts, never from a request:
 
 ```text
-backend/scripts/scrape_wiki.py     # MediaWiki API, rate-limited, resumable cache
+backend/scripts/scrape_wiki.py     # MediaWiki API, rate-limited, resumable — writes data/raw/<version>/
 backend/scripts/build_corpus.py    # chunk → embed (MiniLM, local) → upsert into pgvector, tagged game_version
 backend/data/raw/<game_version>/   # gitignored raw snapshot
 backend/data/corpus/<game_version>/# gitignored built artifacts / manifest
 ```
 
-**Corpus manifest** (`manifest.json` per version): `game_version`, `source` (`terraria.wiki.gg`), `scraped_at`, `page_count`, `chunk_count`, `embedding_model`, `embedding_dim`, `raw_sha256`. The `raw_sha256` makes a re-rag reproducible and auditable.
+**Invocation:** `uv run python -m scripts.scrape_wiki --version 1.4.4.9 [--force]`
 
-**Re-rag is idempotent and operator-triggered:** `build_corpus.py --version <v>` can be re-run; upserts are keyed so re-running doesn't duplicate chunks. The `POST /admin/rerag` button (stretch) wraps this script as a background job; the script itself is the must-have.
+**API base:** `https://terraria.wiki.gg/api.php` · Namespace: 0 (Main) only · Format: wikitext (not HTML) · Batch: 50 pages/request · Rate: 1 batch/second
 
-**Licensing:** wiki content is licensed; the scraper respects `robots.txt`, rate-limits, and attribution is recorded in `deliverables/LICENSES.md`.
+**Discovery runs on every invocation** (cost: ~10 API calls, ~10 s). After discovery, a symmetric diff classifies pages as new / unchanged / disappeared. Disappeared pages are moved to `.checkpoint/orphaned/` and excluded from the manifest. The operator sees `New: N  Unchanged: M  Disappeared: K` before any fetch begins.
+
+**Resumability:** per-page atomic writes (`os.replace`); if the script crashes mid-fetch, re-invocation skips already-written `pages/<page_id>.json` files. Failed pages (retry-exhausted) are written to `.checkpoint/failed.jsonl`; the manifest is not written until the corpus is complete.
+
+**Per-page schema** (`pages/<page_id>.json`): `page_id`, `title`, `namespace`, `revision_id`, `timestamp`, `source_url` (from API `canonicalurl`), `wikitext`, `is_disambiguation`. This is the Phase 2.1 → 2.2 contract; do not change after merge without a revision note.
+
+**Scrape manifest** (`manifest.json`): `game_version`, `source`, `api_base`, `scraped_at`, `page_count`, `raw_sha256`.
+Fields `chunk_count`, `embedding_model`, `embedding_dim` are written by Phase 2.2 (`build_corpus.py`).
+`raw_sha256` = SHA-256 over all page wikitexts concatenated in ascending `page_id` order (separator: `\x00` between fields and entries). Stable across schema additions; changes only when wiki content changes. Phase 5.2's re-rag button keys on this field.
+
+**Licensing:** scraper User-Agent `terra-mind-research/0.1 (…)`, robots.txt checked at startup, attribution in `LICENSES.md §2`.
 
 The trained-classifier artifact contract (SHA-pinned weights, model card, refuse-to-boot on mismatch) is **deferred to future work** along with the model itself (D-009).
 

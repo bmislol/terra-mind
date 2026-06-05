@@ -28,7 +28,7 @@ Tenant isolation is enforced by Postgres Row-Level Security; a short-lived JWT c
 
 **Execution Rule:** Always act as a technical planner first. For any non-trivial task, propose a step-by-step plan and wait for approval before writing code. Once approved, write the code.
 
-**Status:** Phases 1.1–1.5 merged. **Phase 1.6 (Langfuse + logging + redaction) complete** — JSON logging, redaction filter, Langfuse trace per request, eval-threshold refuse-to-boot. Boot verified: `/healthz` 200 + `X-Request-ID`, `/docs` trace visible in Langfuse UI, `/healthz` access log suppressed. **Section 2 (Corpus & RAG)** is next. Eval thresholds remain `PENDING` until S2/S6.
+**Status:** Phases 1.1–1.6 merged. **Phase 2.1 (wiki scrape) complete** — `scripts/scrape_wiki.py` live: MediaWiki API, 50-page batches, 1 req/s, symmetric diff (new/unchanged/disappeared), atomic writes, `failed.jsonl` guard, content-keyed `raw_sha256` manifest. Verified: 5157 pages scraped, idempotent re-run, orphan handling correct. **Phase 2.2 (chunk + embed + corpus build) next.** Eval thresholds remain `PENDING` until S2/S6.
 
 Before suggesting any work, read these files in order:
 1. `Checklist.md` — granular phase-by-phase progress; the source of truth for *what to build next*. **You maintain this file** — update it whenever a phase starts or finishes.

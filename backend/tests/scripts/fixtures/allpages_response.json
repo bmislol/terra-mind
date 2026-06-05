@@ -1,0 +1,14 @@
+{
+  "batchcomplete": "",
+  "continue": {
+    "apcontinue": "Megashark",
+    "continue": "-||"
+  },
+  "query": {
+    "allpages": [
+      {"pageid": 101, "ns": 0, "title": "Copper Shortsword"},
+      {"pageid": 102, "ns": 0, "title": "Eye of Cthulhu"},
+      {"pageid": 103, "ns": 0, "title": "Goblin Army"}
+    ]
+  }
+}

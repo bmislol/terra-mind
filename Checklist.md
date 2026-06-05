@@ -80,10 +80,10 @@ Goal: a reproducible skeleton that boots clean from a fresh clone, with the risk
 Goal: a version-tagged wiki corpus in pgvector and a measured dense-retrieval baseline. Write the golden set **early** so it can't be skipped.
 
 ### Phase 2.1 · Wiki scrape — `feat/07-wiki-scrape`
-- [ ] Confirm target Terraria version = tModLoader stable's supported version (D-016); record it.
-- [ ] `scripts/scrape_wiki.py`: MediaWiki API, rate-limited, resumable cache → `data/raw/<version>/`.
-- [ ] `manifest.json` with `raw_sha256`, page count, source, scraped_at.
-- [ ] Attribution + license recorded in `LICENSES.md`; `ARCH.md §10`; tick.
+- [x] Confirm target Terraria version = tModLoader stable's supported version (D-016); record it.
+- [x] `scripts/scrape_wiki.py`: MediaWiki API, rate-limited, resumable cache → `data/raw/<version>/`.
+- [x] `manifest.json` with `raw_sha256`, page count, source, scraped_at.
+- [x] Attribution + license recorded in `LICENSES.md`; `ARCH.md §10`; tick.
 
 ### Phase 2.2 · Chunk + embed + corpus build — `feat/08-corpus-build`
 - [ ] `scripts/build_corpus.py`: chunk (P-001 strategy), embed (MiniLM, local), upsert into `rag_chunks` tagged `game_version`.
