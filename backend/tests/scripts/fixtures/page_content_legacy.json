@@ -1,0 +1,25 @@
+{
+  "batchcomplete": "",
+  "query": {
+    "pages": {
+      "105": {
+        "pageid": 105,
+        "ns": 0,
+        "title": "Skeletron",
+        "revisions": [
+          {
+            "revid": 123456,
+            "timestamp": "2024-01-10T08:00:00Z",
+            "slots": {
+              "main": {
+                "contentmodel": "wikitext",
+                "contentformat": "text/x-wiki",
+                "*": "'''Skeletron''' is a pre-Hardmode boss."
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

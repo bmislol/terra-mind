@@ -1,0 +1,25 @@
+{
+  "batchcomplete": "",
+  "query": {
+    "pages": {
+      "104": {
+        "pageid": 104,
+        "ns": 0,
+        "title": "Megashark",
+        "revisions": [
+          {
+            "revid": 678901,
+            "timestamp": "2024-01-15T10:30:00Z",
+            "slots": {
+              "main": {
+                "contentmodel": "wikitext",
+                "contentformat": "text/x-wiki",
+                "content": "{{item\n| name = Megashark\n| damage = 70\n}}\nThe '''Megashark''' is a Hardmode gun."
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

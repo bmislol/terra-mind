@@ -6,6 +6,7 @@ dependencies = [
     "alembic>=1.13",
     "asyncpg>=0.29",
     "fastapi>=0.115",
+    "httpx>=0.27",
     "hvac>=2.3",
     "langfuse>=2.0,<3.0",
     "pgvector>=0.3",
@@ -24,10 +25,10 @@ packages = ["app"]
 
 [dependency-groups]
 dev = [
-    "httpx>=0.27",
     "mypy>=1.10",
     "pytest>=8.2",
     "pytest-asyncio>=0.23",
+    "respx>=0.21",
     "ruff>=0.4",
     "types-pyyaml>=6.0",
 ]
@@ -46,7 +47,7 @@ exclude = ["app/db/migrations/versions/"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["hvac.*", "pgvector.*", "alembic.*", "langfuse.*"]
+module = ["hvac.*", "pgvector.*", "alembic.*", "langfuse.*", "respx.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -10,11 +10,13 @@ terra-mind source code: **MIT** (set on the repository).
 
 ## 2. Data Source — Terraria Wiki
 
-- **Source:** `https://terraria.wiki.gg` (the Official Terraria Wiki), accessed via the MediaWiki API.
+- **Source:** `https://terraria.wiki.gg` (the Official Terraria Wiki), accessed via the MediaWiki API (`https://terraria.wiki.gg/api.php`).
 - **Used for:** the RAG corpus (chunked + embedded into pgvector).
 - **Content license:** **CC BY-NC-SA 4.0** — all textual content on the wiki is licensed Attribution-NonCommercial-ShareAlike 4.0 International.
-- **Attribution:** preserved in each corpus chunk's metadata (source URL + page title) and in the corpus `manifest.json`.
+- **Attribution:** preserved in each corpus chunk's metadata (`source_url` + page title, from the API's `canonicalurl` field) and in the corpus `manifest.json`.
 - **Local cache:** raw scrape stored at `backend/data/raw/<version>/` — gitignored, not committed.
+- **Scraper User-Agent:** `terra-mind-research/0.1 (Terraria AI companion, academic; https://github.com/bmislol/terra-mind)`
+- **robots.txt:** checked at startup; scraper aborts if `/api.php` is disallowed. Rate: 1 batch/second (50 pages/batch).
 
 > **⚠️ License implication — read before any commercial framing.** CC BY-NC-SA 4.0 is **NonCommercial** and **ShareAlike**. For this academic submission (non-commercial, attributed) it is fine. But:
 > - terra-mind **cannot be commercialized** as-is while its answers are derived from this corpus.
