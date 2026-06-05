@@ -127,8 +127,8 @@ Goal: a version-tagged wiki corpus in pgvector and a measured dense-retrieval ba
 - [x] Recipe spot-check: two multi-recipe items each have one `section="recipe"` chunk per recipe with correct ingredients (broken-bar parsing verified).
 
 ### Phase 2.3 · RAG golden set — `feat/09-rag-golden`
-- [ ] 15 Terraria progression questions + expected source chunks → `data/eval/eval_rag.jsonl`.
-- [ ] Spot-check answers exist in the corpus; `EVALS.md` documents the set; tick.
+- [x] 15 Terraria progression questions + expected source chunks → `data/eval/eval_rag.jsonl`.
+- [x] Spot-check answers exist in the corpus; `EVALS.md` documents the set; tick.
 
 ### Phase 2.4 · Dense retrieval + hit@k — `feat/10-rag-dense`
 - [ ] `app/rag/pipeline.py`: dense-only, `game_version`-filtered (D-008).
