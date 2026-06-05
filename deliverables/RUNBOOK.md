@@ -105,17 +105,29 @@ curl -s http://localhost:8000/users/me -H "Authorization: Bearer $TOKEN" | pytho
 
 ## 4. Build / Re-rag the Wiki Corpus
 
-_(Phase 2.1–2.2.)_ The corpus is built offline by scripts, never from a request.
+_(Phase 2.1–2.2.)_ The corpus is built offline by three host-side scripts in sequence, never from a request.
 
 ```bash
 cd backend
-# 1) Scrape (rate-limited, resumable) → data/raw/<version>/
+
+# 1) Scrape wikitext (rate-limited, resumable) → data/raw/<version>/pages/
 uv run python -m scripts.scrape_wiki --version <game_version>
-# 2) Chunk + embed + upsert into pgvector, tagged with game_version (idempotent)
+
+# 2) Scrape Cargo (Items + Recipes tables) → data/raw/<version>/cargo/
+#    Requires scrape_wiki.py to have run first (reads manifest.json).
+uv run python -m scripts.scrape_cargo --version <game_version>
+
+# 3) Chunk + embed + upsert into pgvector, tagged with game_version (idempotent)
+#    Requires DATABASE_URL env var pointing at a running Postgres instance.
 uv run python -m scripts.build_corpus --version <game_version>
 ```
 
-`build_corpus` writes a `manifest.json` (`page_count`, `chunk_count`, `embedding_model`, `embedding_dim`, `raw_sha256`). Re-running is safe (upsert-keyed). The operator's "re-rag" button (stretch) wraps step 2 as a background job.
+All three scripts are idempotent: re-running is safe. `scrape_wiki.py` and `scrape_cargo.py` skip already-fetched data. `build_corpus.py` uses `INSERT … ON CONFLICT … DO UPDATE` (upsert-keyed on `page_id, chunk_index, game_version`).
+
+After `build_corpus` completes, `manifest.json` contains:
+`page_count`, `raw_sha256`, `cargo_scraped_at`, `cargo_raw_sha256`, `cargo_table_counts`, `chunk_count`, `embedding_model`, `embedding_dim`.
+
+The operator's "re-rag" button (Phase 5.2 stretch) wraps step 3 as a background job; the scripts themselves are the must-have.
 
 ## 5. Running the Eval Suites
 

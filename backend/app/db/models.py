@@ -79,6 +79,11 @@ class RagChunk(Base):
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), primary_key=True, default=uuid4
     )
+    # Upsert key: UNIQUE (page_id, chunk_index, game_version) — see migration.
+    page_id: Mapped[int] = mapped_column(nullable=False)
+    chunk_index: Mapped[int] = mapped_column(nullable=False)
+    revision_id: Mapped[int] = mapped_column(nullable=False, default=0)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False, default="")
     game_version: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     page_title: Mapped[str] = mapped_column(String(512), nullable=False)
     section: Mapped[str] = mapped_column(String(512), nullable=False, default="")

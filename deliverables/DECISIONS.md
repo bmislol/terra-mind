@@ -122,14 +122,52 @@ Architectural decision log for **terra-mind**. Every significant choice lives he
 
 ---
 
+### D-018 — Chunking strategy
+**Status:** Locked (2026-06-05, Phase 2.2)
+**Choice:** Hybrid structural + sliding-window + Cargo template synthesis.
+- Wikitext split at L2 headings via mwparserfromhell `get_sections(levels=[2])`; `strip_code()` for plain text.
+- Token budget: 180-token target window (MiniLM's 256-token context − 76-token buffer for prepend + special tokens), 30-token overlap, 20-token minimum.
+- Prepend: `"{page_title} — {section_heading}\n"` on every chunk's embed text.
+- Cargo Items synthesis: `section="stats"` chunk from Cargo Items row (damage, usetime, knockback, velocity, critical, defense, mana, tooltip). Use-time labels from wiki-sourced thresholds (≤8 Insanely fast … ≥56 Snail).
+- Cargo Recipes synthesis: `section="recipe"` chunk per Recipes row; args parsed via U+00A6 BROKEN BAR separator.
+- NPC synthesis: `section="stats"` + `section="drops"` from wikitext `{{npc infobox}}` template; Classic-mode damage/defense via `{{modes}}` first-positional extraction.
+- Cargo tables scraped: **Items** and **Recipes** only. NPCs, Drops, History, Equipinfo, Modifiers, Weapon_source, Exclusive, Imageinfo explicitly rejected (redundant with wikitext extraction or outside scope).
+**Why:** Item stats are Cargo-only (all item pages use `{{item infobox | auto = NNN}}` with no literal damage params); wikitext wikitext-only approach left ~3,800 item pages with no stats chunk. Cargo integration closes this gap without re-scraping. Recipe data (4,221 rows) is not in wikitext at all. NPC pages have Classic-mode stats in `{{modes}}` template args and are already extractable.
+**Number / evidence (measured 2026-06-05, `game_version=1.4.4.9`):**
+
+| Metric | Value |
+|---|---|
+| Total chunks | **22,173** |
+| Distinct pages with ≥1 chunk | 4,534 of 5,157 (623 pages → empty after stripping: disambiguations + purely template pages) |
+| Distinct section labels | **29** (down from 1,329 before `_normalize_section_name`) |
+| Cargo stats chunks (`section="stats"`, Items rows) | 2,808 across 2,771 pages |
+| Recipe chunks (`section="recipe"`) | 1,590 |
+| NPC drop chunks (`section="drops"`) | 170 |
+| Intro prose chunks (`section="intro"`) | 5,278 |
+| Misc chunks (normalised non-English headings) | 5,962 |
+| Notes / Trivia / Tips prose | 2,133 / 2,041 / 1,788 |
+| Embedding model | `sentence-transformers/all-MiniLM-L6-v2`, 384-dim |
+| Build wall time | ~1:40 (model cached) / ~2:00 (first run) |
+
+**Join-key characteristics (not bugs — structural properties of the wiki):**
+- 3,462 of 6,233 Cargo Items rows (54%) have no matching wiki page: internal IDs, tile variants, sub-items without standalone pages. These Cargo rows produce no chunks.
+- 2,631 of 4,221 Recipes rows (62%) have a `result` that doesn't match any wiki page. Logged to `cargo/orphan_recipes.jsonl`. Same cause: recipe register pages reference item IDs that the wiki doesn't expose as standalone articles.
+- Phase 2.4 hit@k measurement will surface whether these join gaps hurt retrieval. If so, a follow-up phase queries the wiki redirect API to resolve canonical names — not a Phase 2.2 task.
+
+### D-019 — pgvector index (graduated from P-002)
+**Status:** Locked (2026-06-05, Phase 2.2)
+**Choice:** HNSW, `m=16`, `ef_construction=64`, `vector_cosine_ops` on `rag_chunks(embedding)`.
+**Why:** At ~20k–50k chunks, HNSW at `ef_search=40` gives >99% recall@10 vs IVFFlat's ~90% (searching `lists/10` probe lists at `lists≈sqrt(n)`). For dense-only retrieval (D-008) with no BM25 fallback, that ~10% miss rate is material. Build time at this corpus size is seconds. Memory overhead: ~6–15 MB. MiniLM outputs L2-normalised embeddings; cosine distance equals inner product — `vector_cosine_ops` is correct.
+**Number / evidence:** Query latency + recall@10 on golden set — `PENDING (Phase 2.4)`. Index choice is locked now; the evidence number fills in with the Phase 2.4 measurement.
+
+---
+
 ## Pending Decisions
 
 Open questions we know we must answer. Each graduates to a `D-NNN` once settled, **with a number**.
 
 | ID | Question | Decide during | Number it will be backed by |
 |---|---|---|---|
-| P-001 | Wiki chunking strategy (structural by section/infobox vs sliding-window vs hybrid) | RAG phase | hit@k delta on golden set |
-| P-002 | pgvector index type + params (HNSW vs IVFFlat; `m`/`ef` or `lists`) | corpus-build phase | recall vs query-latency at corpus scale |
 | P-003 | RAG eval thresholds (hit@k floor, possibly MRR@10) | after baseline measurement | measured baseline on the 15 golden questions |
 | P-004 | Redis session TTL value | memory phase | session-length distribution / defended choice |
 | P-005 | **Singleplayer tenant identity** — what the mod exchanges for a JWT when there is no multiplayer server ID | auth + client phase | n/a (design decision; documented rationale) |
@@ -145,3 +183,5 @@ Open questions we know we must answer. Each graduates to a `D-NNN` once settled,
 - **2026-06-04 · D-007:** Locked Vault KV paths to `secret/terra-mind/anthropic` (`api_key`) and `secret/terra-mind/jwt` (`signing_key`). Logical dotted names in original decision now mapped to concrete physical paths seeded by vault-init.
 - **2026-06-04 · D-017 (new):** audit_log RLS exemption and terramind_app role split locked. API connects as terramind_app (non-superuser); migrate connects as terramind (owner). audit_log has no RLS — operator-gated at the service layer.
 - **2026-06-04 · D-007 (Phase 1.6 addendum):** Langfuse credentials come from env, not Vault — circular dependency and no security benefit for a dev-local stack. SDK keys seeded via `LANGFUSE_INIT_PROJECT_*` compose vars.
+- **2026-06-05 · D-018 (new, graduates P-001):** Chunking strategy locked: hybrid structural + sliding-window + Cargo template synthesis. Cargo Items + Recipes scraped; NPCs and all other tables explicitly rejected. Measured (2026-06-05): 22,173 total chunks from 4,534 of 5,157 pages; 29 distinct section labels; 2,808 stats / 1,590 recipe / 170 drop / 5,962 misc / 5,278 intro chunks. Join-key gap noted: 54% of Items rows and 62% of Recipes rows have no matching wiki page (structural, not a bug — tracked in orphan_recipes.jsonl; Phase 2.4 will confirm retrieval impact).
+- **2026-06-05 · D-019 (new, graduates P-002):** HNSW index, m=16, ef_construction=64, vector_cosine_ops. Recall@10 + latency numbers PENDING Phase 2.4 golden-set measurement.

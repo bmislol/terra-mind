@@ -86,10 +86,45 @@ Goal: a version-tagged wiki corpus in pgvector and a measured dense-retrieval ba
 - [x] Attribution + license recorded in `LICENSES.md`; `ARCH.md §10`; tick.
 
 ### Phase 2.2 · Chunk + embed + corpus build — `feat/08-corpus-build`
-- [ ] `scripts/build_corpus.py`: chunk (P-001 strategy), embed (MiniLM, local), upsert into `rag_chunks` tagged `game_version`.
-- [ ] Idempotent re-run (upsert-keyed, no duplicates).
-- [ ] Record chunk count + chosen chunking params → graduate P-001 to a `D-NNN`.
-- [ ] `ARCH.md §11`; tick.
+
+#### Scripts
+#### Scripts
+- [x] `scripts/scrape_cargo.py` — cargoquery pagination (Items + Recipes tables), rate-limited, idempotent, atomic writes, loud failure on any error.
+- [x] `scripts/_cargo/__init__.py`, `_cargo/fetcher.py` (cargoquery loop, retry), `_cargo/manifest.py` (cargo_raw_sha256, manifest merge).
+- [x] `scripts/build_corpus.py` — loads Cargo dicts at startup, reads pages/, chunks+embeds+upserts into `rag_chunks`, writes manifest cargo fields.
+
+#### app/rag/
+- [x] `app/rag/models.py` — `ChunkRecord` Pydantic model.
+- [x] `app/rag/chunker.py` — all chunk types: Cargo stats, recipe, NPC template synthesis, prose sections (structural + sliding window), mwparserfromhell wikitext stripping.
+- [x] `app/rag/embedder.py` — `SentenceTransformer` wrapper, batch encode, returns `np.ndarray` of shape `(n, 384)`.
+
+#### ORM + migration
+- [x] `app/db/models.py` — add `page_id`, `chunk_index`, `revision_id`, `source_url` fields to `RagChunk`.
+- [x] New Alembic migration — 4 columns + `UNIQUE (page_id, chunk_index, game_version)` constraint + HNSW index `(embedding vector_cosine_ops) WITH (m=16, ef_construction=64)`.
+
+#### Dependencies
+- [x] `pyproject.toml` — add `mwparserfromhell`, `sentence-transformers`, `psycopg[binary]` to runtime deps; add mypy `ignore_missing_imports` overrides for new packages.
+- [x] `uv lock && uv sync` after dep changes; confirm `uv.lock` committed.
+
+#### Tests (87 total after all cleanup fixes — ruff + mypy + pytest all green, no live network or DB)
+- [x] `tests/rag/__init__.py` + `tests/rag/test_chunker.py` — chunker tests covering prose chunking, disambiguation filter, token budget, template synthesis, Cargo stats synthesis, HTML stripping, broken-bar recipe parsing, multi-recipe chunks, orphan recipe logging, Cargo-item-without-wiki-page skip, section normalisation.
+- [x] `tests/rag/test_embedder.py` — 4 tests: correct output shape, batching, L2-normalised vectors, empty input.
+- [x] `tests/scripts/test_scrape_cargo.py` — unit tests for `_cargo/` (pagination parse, field handling, manifest merge, failure policy).
+- [x] `tests/scripts/test_build_corpus.py` — upsert SQL regression guard + SQLite integration test; orphan write tests.
+
+#### Deliverables (updated in same PR, before manual runs)
+- [x] `deliverables/ARCH.md §10` — add `scrape_cargo.py` to offline pipeline diagram; document `cargo/` output layout and `manifest.json` `cargo_*` field extensions.
+- [x] `deliverables/ARCH.md §11` — corpus stats table updated with measured values (22,173 chunks, 29 sections, HNSW index confirmed).
+- [x] `deliverables/DECISIONS.md` — graduate P-001 → D-018 and P-002 → D-019 with final measured numbers; revision log entries.
+- [x] `deliverables/LICENSES.md §2` — confirm Cargo data carries same CC BY-NC-SA 4.0 as wikitext (same wiki, same content).
+- [x] `deliverables/RUNBOOK.md §4` — invocation sequence: `scrape_wiki` → `scrape_cargo` → `build_corpus`.
+- [x] `CLAUDE.md §2` status line updated (last, after operator verifies and ticks all items above).
+
+#### Manual verification (operator runs after CI green — not part of agent gate)
+- [x] `scrape_cargo.py --version 1.4.4.9` runs end-to-end; `cargo/items.json` (6,233 rows) and `cargo/recipes.json` (4,221 rows) present; `manifest.json` has valid `cargo_raw_sha256` and `cargo_table_counts`; idempotent re-run exits cleanly.
+- [x] `build_corpus.py --version 1.4.4.9` runs end-to-end; 22,173 chunks in `rag_chunks`; manifest updated with `chunk_count=22173`, `embedding_model`, `embedding_dim`.
+- [x] Stats spot-check: Megashark, Wooden Sword, Last Prism each have a `section="stats"` chunk with correct `damage` and `usetime` from Cargo.
+- [x] Recipe spot-check: two multi-recipe items each have one `section="recipe"` chunk per recipe with correct ingredients (broken-bar parsing verified).
 
 ### Phase 2.3 · RAG golden set — `feat/09-rag-golden`
 - [ ] 15 Terraria progression questions + expected source chunks → `data/eval/eval_rag.jsonl`.
