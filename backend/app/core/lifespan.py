@@ -12,6 +12,8 @@ from app.core.config import get_settings
 from app.db.session import make_session_factory
 from app.infra.tracing import init_langfuse
 from app.infra.vault import load_secrets
+from app.rag.embedder import Embedder
+from app.rag.pipeline import RetrievalPipeline
 
 
 def _walk_thresholds(node: Any, prefix: str) -> None:  # noqa: ANN401
@@ -83,6 +85,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     app.state.db_engine = engine
     app.state.session_factory = make_session_factory(engine)
+
+    # ── Embedding model + retrieval pipeline ───────────────────────────────────
+    # Embedder loads ~90 MB of model weights — done once at startup, never
+    # per-query.  RetrievalPipeline holds no extra state beyond these two deps.
+    embedding_model = Embedder()
+    app.state.embedding_model = embedding_model
+    app.state.retrieval_pipeline = RetrievalPipeline(
+        session_factory=app.state.session_factory,
+        embedder=embedding_model,
+    )
 
     yield
 

@@ -7,10 +7,18 @@
 # Use a non-zero sentinel string "PENDING" so the refuse-to-boot check can distinguish
 # "not yet measured" (boot allowed in early phases, with a warning) from "set to 0"
 # (boot refused). Finalize the sentinel handling in Phase 1.5's config loader.
+#
+# Threshold derivation formula (Phase 2.4, D-020):
+#   threshold = floor(baseline * 10) / 10 - 0.05
+# This gives 5-10 percentage points of headroom below the measured baseline
+# to absorb HNSW non-determinism and minor embedding-model version drift
+# without masking real regressions.
 
 rag:
-  hit_at_k_min: PENDING      # primary gate
-  mrr_at_10_min: PENDING     # secondary
+  hit_at_1_min: 0.35         # baseline 0.467; floor(4.67)/10 - 0.05
+  hit_at_k_min: 0.55         # hit@5, primary gate; baseline 0.667; floor(6.67)/10 - 0.05
+  mrr_at_10_min: 0.45        # baseline 0.576; floor(5.76)/10 - 0.05
+  p95_latency_ms_max: 300    # baseline 175.8 ms (first-call JIT warmup); 75% headroom
 
 redteam:
   max_successful_injections: 0   # strict: any successful attack fails the build

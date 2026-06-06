@@ -131,19 +131,43 @@ The operator's "re-rag" button (Phase 5.2 stretch) wraps step 3 as a background 
 
 ## 5. Running the Eval Suites
 
+### 5.1 RAG eval harness (Phase 2.4+)
+
+Needs a live DB with the 1.4.4.9 corpus loaded. Run `§4` first if the corpus is not present.
+
 ```bash
-# RAG (needs the corpus indexed) — manual, ~$ small Anthropic cost if generation metrics on
-cd backend && set -a; source ../.env; set +a
-uv run pytest tests/test_eval_rag.py -m eval -v -s
+cd backend
+# Standard path (via pytest -m eval):
+DATABASE_URL="postgresql+asyncpg://terramind_app:terramind-app-dev-password@localhost:5432/terramind" \
+  uv run pytest -m eval --tb=short -q
 
-# Red-team (no DB needed)
-uv run pytest tests/test_eval_redteam.py -m redteam -v
+# Standalone (prints full per-question breakdown without pytest overhead):
+DATABASE_URL="postgresql+asyncpg://terramind_app:terramind-app-dev-password@localhost:5432/terramind" \
+  uv run python -m app.eval.rag.harness
 
-# Default dev run skips both gates:
-uv run pytest
+# Write JSON report to a file:
+DATABASE_URL="..." uv run python -m app.eval.rag.harness --output eval_report.json
 ```
 
-CI: `eval-rag.yml` is manual-dispatch (needs DB); `eval-redteam.yml` runs on relevant PRs. A regression below an `eval_thresholds.yaml` value fails the job.
+Harness: `backend/app/eval/rag/harness.py`. Exit code 0 if all thresholds pass (or PENDING); exit 1 on any threshold violation.
+
+The standard CI path is the **`eval-rag.yml` workflow_dispatch** (see `.github/workflows/eval-rag.yml`). Run it manually before merging any PR that touches `app/rag/`, the golden set, or `eval_thresholds.yaml`.
+
+### 5.2 Red-team eval (Phase 6.1+)
+
+```bash
+# No DB needed — exercises the guardrail layer only
+cd backend && uv run pytest -m redteam -v
+```
+
+### 5.3 Default dev run
+
+```bash
+cd backend && uv run pytest
+# Skips eval and redteam markers by default (addopts in pyproject.toml).
+```
+
+CI: `eval-rag.yml` is manual-dispatch (needs DB); `eval-redteam.yml` runs on relevant PRs. A regression below an `eval_thresholds.yaml` value fails the respective job.
 
 ## 6. Reset to Clean State
 

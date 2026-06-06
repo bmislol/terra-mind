@@ -131,10 +131,10 @@ Goal: a version-tagged wiki corpus in pgvector and a measured dense-retrieval ba
 - [x] Spot-check answers exist in the corpus; `EVALS.md` documents the set; tick.
 
 ### Phase 2.4 · Dense retrieval + hit@k — `feat/10-rag-dense`
-- [ ] `app/rag/pipeline.py`: dense-only, `game_version`-filtered (D-008).
-- [ ] Eval harness; measure hit@k baseline → set thresholds in `eval_thresholds.yaml` (graduate P-003).
-- [ ] `.github/workflows/eval-rag.yml` (manual dispatch; needs live DB).
-- [ ] Decide hybrid escalation yes/no from the number (P-007); `DECISIONS`, `EVALS.md`; tick.
+- [x] `app/rag/pipeline.py`: dense-only, `game_version`-filtered (D-008).
+- [x] Eval harness (`app/eval/rag/harness.py`); measure hit@k baseline → set thresholds in `eval_thresholds.yaml` (graduate P-003 → D-020).
+- [x] `.github/workflows/eval-rag.yml` (manual dispatch; needs live DB).
+- [x] Decide hybrid escalation from the number (P-007): hit@5=0.667 < 0.75 → P-007 stays OPEN, forcing function documented in `DECISIONS.md`; `ARCH.md §11`, `EVALS.md §1.5–1.6` updated; tick.
 
 ---
 
