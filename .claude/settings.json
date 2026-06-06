@@ -1,7 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:hub.docker.com)"
+      "WebFetch(domain:hub.docker.com)",
+      "Bash(pip show *)",
+      "Bash(uv run *)",
+      "Bash(docker compose *)",
+      "Bash(DATABASE_URL=\"postgresql+asyncpg://terramind_app:terramind-app-dev-password@localhost:5432/terramind\" uv run python -m app.eval.rag.harness)",
+      "Bash(DATABASE_URL=postgresql+asyncpg://terramind_app:terramind-app-dev-password@localhost:5432/terramind uv run python -c ' *)"
     ]
   }
 }

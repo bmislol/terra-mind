@@ -328,7 +328,7 @@ The trained-classifier artifact contract (SHA-pinned weights, model card, refuse
 
 ## 11. RAG Architecture
 
-_Corpus numbers filled from the Phase 2.2 build run (2026-06-05). Retrieval numbers (hit@k, latency) remain PENDING until Phase 2.4 measures them against the 15-question golden set._
+_Corpus numbers measured Phase 2.2 (2026-06-05). Retrieval baseline measured Phase 2.4 (2026-06-06)._
 
 | Concern | Choice | Status |
 |---|---|---|
@@ -337,10 +337,11 @@ _Corpus numbers filled from the Phase 2.2 build run (2026-06-05). Retrieval numb
 | Embedding model | `all-MiniLM-L6-v2`, **384-dim**, local. `bge-small-en-v1.5` is a drop-in re-embed if quality demands it. | D-004, locked |
 | Chunking strategy | **Hybrid structural + sliding-window + Cargo synthesis.** 180-token target, 30-token overlap, 20-token min. 29 distinct section labels (normalised; non-English headings → `"misc"`). Details: D-018. | D-018 (P-001 graduated) |
 | Vector store | pgvector `rag_chunks` — `vector(384)`. **HNSW index, m=16, ef_construction=64, `vector_cosine_ops`.** | D-019 (P-002 graduated) |
-| Retrieval | **Dense-only first.** Baseline hit@k PENDING (Phase 2.4). | D-008, RAG phase |
-| Hybrid (escalation) | BM25 + RRF added **only if** dense underperforms, recorded as a number-backed delta. | conditional (P-007) |
+| Retrieval | **Dense-only.** Phase 2.4 baseline: hit@5 = 0.667, hit@10 = 0.867, MRR@10 = 0.576, latency 5.6 ms median / 175.8 ms p95 (first-call JIT warmup). Thresholds in `eval_thresholds.yaml` (D-020). | D-008, measured |
+| Hybrid (escalation) | BM25 + RRF open (P-007). Resolution criterion: hit@5 must improve ≥ 0.05 over dense-only baseline. Dense-only ships for now. | conditional (P-007 open) |
 | Query transformation | **None** — HyDE rejected on latency grounds for live advice. | n/a (D-008) |
-| Metadata filtering | `game_version` filter on every query (and a future `content_pack` axis for mods). | D-005, RAG phase |
+| Metadata filtering | `game_version` filter on every query (and a future `content_pack` axis for mods). | D-005, Phase 2.4 |
+| Known retrieval gaps | Q11 (mage armor post-Plantera) and Q15 (post-Golem progression) are persistent dense-only failures: the query does not name its answer entity. See EVALS.md §1.6. | Phase 2.4 finding |
 
 ## 12. Tracing and Logging
 

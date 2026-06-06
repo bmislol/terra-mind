@@ -1,10 +1,10 @@
 # EVALS.md
 
-Last updated: 2026-06-03
+Last updated: 2026-06-06 (Phase 2.4)
 
 Two golden gates protect `main`: **RAG retrieval** and **red-team safety**. A separate **redaction test** sits on the same blocking-merge tier. Thresholds live in `eval_thresholds.yaml` at the repo root; a regression below threshold blocks merge, and the `api` refuses to boot if any threshold is zero or missing.
 
-> **Day-zero status.** Nothing is measured yet. Every number below is `PENDING (measure)` and is filled from a real run, never guessed. Thresholds are set *after* a baseline exists (RAG in Phase 2.4, red-team in Phase 6.1).
+> **Phase 2.4 status.** RAG baseline measured 2026-06-06. Thresholds committed in `eval_thresholds.yaml` (D-020). Red-team gate remains PENDING until Phase 6.1.
 
 ---
 
@@ -15,7 +15,7 @@ The primary quality gate. Measures whether the right wiki facts are retrieved fo
 ### 1.1 Golden Set
 
 - **15** Terraria progression questions (the brief's golden set).
-- Stored at `backend/app/eval/rag/golden_set.jsonl`.
+- Stored at `backend/data/eval/eval_rag.jsonl` (committed; `data/eval/` is intentionally not gitignored).
 - Each row: `{ "question", "ideal_answer", "ground_truth_chunks": [chunk_id, ...], "game_version" }`.
 - Hand-curated to span progression stages (pre-boss, pre-hardmode, post-mech, post-Plantera, endgame) and class-specific gear questions, so retrieval is tested across the whole game, not just early content.
 - Written **early** (Phase 2.3) so it can't be skipped under deadline pressure.
@@ -34,23 +34,56 @@ Judge tool (RAGAS or a frozen Claude judge): choice + justification `PENDING` (P
 
 ### 1.3 Thresholds
 
-Committed in `eval_thresholds.yaml`, filled from the Phase 2.4 baseline (graduates P-003):
+Committed in `eval_thresholds.yaml` (Phase 2.4 baseline; graduates P-003 → D-020):
 
 ```yaml
 rag:
-  hit_at_k_min: PENDING        # set to (baseline − small margin) once measured
-  mrr_at_10_min: PENDING
+  hit_at_1_min: 0.35         # baseline 0.467
+  hit_at_k_min: 0.55         # hit@5, primary gate; baseline 0.667
+  mrr_at_10_min: 0.45        # baseline 0.576
+  p95_latency_ms_max: 300    # baseline 175.8 ms (first-call JIT warmup)
 ```
 
-A threshold of zero is rejected by the refuse-to-boot check.
+Derivation formula: `threshold = floor(baseline × 10) / 10 − 0.05` (see D-020 for full rationale). A threshold of zero is rejected by the refuse-to-boot check.
+
+**Latency calibration note:** the 300 ms p95 ceiling reflects local development (fresh-start PyTorch JIT warmup dominates). Steady-state p95 is ~15 ms. The ceiling may need recalibration after the first eval-rag.yml run on GitHub-hosted runners; defer to that first run.
 
 ### 1.4 Retrieval-Strategy Decision Point
 
-Phase 2.4 measures **dense-only** first (D-008). If hit@k underperforms on named-item queries, BM25 + RRF is added and the gain recorded as a number-backed delta (graduates P-007). HyDE is not used (latency; D-008).
+Phase 2.4 measured **dense-only** (D-008). hit@5 = 0.667, below the 0.75 resolution floor for P-007. Dense-only ships; hybrid (BM25 + RRF) escalation remains open in P-007 with the forcing function: a dedicated future phase must demonstrate hit@5 improvement ≥ 0.05 over this baseline to justify adoption. HyDE is not used (latency; D-008).
 
-### 1.5 CI Gate
+### 1.5 Phase 2.4 Baseline Numbers
+
+Measured 2026-06-06 on corpus version 1.4.4.9 (22,173 chunks, HNSW ef_search=40 default):
+
+| Metric | Value |
+|---|---|
+| hit@1 | 0.467 (7/15) |
+| hit@3 | 0.600 (9/15) |
+| hit@5 | 0.667 (10/15) |
+| hit@10 | 0.867 (13/15) |
+| MRR@10 | 0.576 |
+| Median latency | 5.6 ms |
+| p95 latency | 175.8 ms (first-call JIT warmup) |
+
+Questions that pass at hit@5: Q01 (Copper Shortsword), Q02 (Confused debuff), Q03 (Wooden Sword craft), Q05 (Summon Skeletron), Q07 (Megashark stats), Q09 (Megashark vs Uzi ⚠️), Q10 (Golem drops), Q12 (Terra Blade), Q13 (Moon Lord drops), Q14 (Stardust Dragon Staff).
+
+Questions that miss at hit@5 but hit at hit@10: Q04 (Eye of Cthulhu), Q06 (Wall of Flesh), Q08 (Skeletron Prime drops). These are boss-drop questions where the correct chunk ranks 7–8 behind semantically similar boss pages.
+
+Questions that are complete misses (hit@10 = 0): Q11, Q15. See §1.6.
+
+### 1.6 Known Semantic-Gap Failures
+
+**Q11** ("What armor should a Mage use after defeating Plantera?") and **Q15** ("After defeating Golem, what should I do next to progress toward the final boss?") consistently fail dense retrieval (hit@10 = 0). The cause is that neither query names its answer entity: Q11 needs "Spectre" and Q15 needs "Lunatic Cultist," both of which are absent from the query text. MiniLM lacks the game-domain knowledge to bridge these gaps. These failures cannot be resolved by retrieval alone; they require query rewriting or HyDE-style hypothetical-answer expansion, which D-008 rejects on latency grounds. **Future improvement path:** Phase 3.1's classifier router detects entity-free queries and either prompts the LLM to expand the query, or routes to a slower hybrid path.
+
+### 1.7 CI Gate
 
 Job: `.github/workflows/eval-rag.yml` — **manual dispatch only**. The gate needs a live pgvector DB with the indexed corpus; spinning that up on every PR would add fragile minutes per run. The maintainer runs it before merging any PR touching `app/rag/`, the golden set, or `eval_thresholds.yaml`. PR-time CI (lint/type/unit) skips eval tests automatically (they are marked `-m eval`).
+
+Harness: `backend/app/eval/rag/harness.py`. Run locally with:
+```bash
+cd backend && DATABASE_URL="postgresql+asyncpg://..." uv run pytest -m eval --tb=short
+```
 
 ---
 
@@ -94,16 +127,16 @@ A test asserts a fake secret (`sk-test-FAKE-not-real`) never appears unredacted 
 
 ## 5. Final Submission Numbers
 
-Filled in Phase 7.2. All `PENDING` until measured.
+Partially filled as phases land. Remaining `PENDING` values are filled in Phase 7.2.
 
 | Metric | Value |
 |---|---|
 | Embedding model | all-MiniLM-L6-v2 (384-dim, local) |
-| Corpus size (pages / chunks) | PENDING |
-| Retrieval strategy (dense / hybrid) | PENDING (decided in 2.4) |
-| RAG hit@k | PENDING |
-| RAG MRR@10 | PENDING |
+| Corpus size (pages / chunks) | 5,157 pages scraped; 22,173 chunks (4,534 pages with ≥1 chunk) |
+| Retrieval strategy (dense / hybrid) | Dense-only (D-008); hybrid escalation open in P-007 |
+| RAG hit@5 | 0.667 (baseline, Phase 2.4) |
+| RAG MRR@10 | 0.576 (baseline, Phase 2.4) |
 | RAG faithfulness (if measured) | PENDING |
 | Red-team successful injections | PENDING (target 0) |
 | Agent loop iteration cap | PENDING (P-008) |
-| Median `/bot/ask` latency | PENDING |
+| Median `/bot/ask` latency | PENDING (end-to-end; RAG retrieve() median = 5.6 ms) |

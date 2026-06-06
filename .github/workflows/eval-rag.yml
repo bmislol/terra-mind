@@ -1,33 +1,20 @@
 name: eval-rag
 
-# Manual-dispatch only. The RAG gate needs a live pgvector DB with the wiki corpus
-# indexed; building/indexing that on every PR would add fragile minutes per run.
-# The maintainer runs this before merging any PR that touches app/rag/, the golden
-# set, or eval_thresholds.yaml. PR-time CI skips eval tests (they are marked -m eval).
-#
-# SCAFFOLD: the corpus-load step is finalized in Phase 2.4 once build_corpus.py and the
-# golden set exist. Until then this workflow is present but not wired to real data.
-
+# Manual dispatch only — never on push or PR.
+# The harness needs a live DB with the indexed corpus; spinning that up on
+# every PR would add fragile minutes per run (EVALS.md §1.5).
+# Run before merging any PR that touches app/rag/, data/eval/, or
+# eval_thresholds.yaml.
 on:
   workflow_dispatch:
 
 jobs:
-  eval-rag:
+  eval:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
-    services:
-      db:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: terramind
-          POSTGRES_PASSWORD: terramind-dev-password
-          POSTGRES_DB: terramind
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U terramind -d terramind"
-          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://terramind_app:terramind_app@localhost:5432/terramind_app
 
     steps:
       - uses: actions/checkout@v4
@@ -42,26 +29,68 @@ jobs:
         working-directory: backend
         run: uv sync --frozen
 
-      - name: Run migrations + index corpus (finalized in Phase 2.4)
-        working-directory: backend
-        env:
-          DATABASE_URL: postgresql+asyncpg://terramind:terramind-dev-password@localhost:5432/terramind
-        run: |
-          if [ -d alembic ]; then
-            uv run alembic upgrade head
-            # TODO (Phase 2.4): load a small committed eval corpus fixture, or build_corpus --version <v>
-          else
-            echo "Phase 1.5 not reached: no alembic migrations yet — skipping (scaffold)."
-          fi
+      # ── Corpus cache ────────────────────────────────────────────────────────
+      # Cache key: hash of the three corpus-build scripts + version string.
+      # Scripts changing → cache invalidates → rebuild.  Stable scripts →
+      # cache hit → skip scrape, load existing raw data into fresh DB.
+      #
+      # Warm cache:  restore (~5 s) + DB load (~90 s) + harness (~30 s) ≈ 2 min
+      # Cold cache:  scrape (~5 min) + build (~2 min) + harness (~30 s) ≈ 8 min
+      - name: Restore corpus cache
+        id: corpus-cache
+        uses: actions/cache@v4
+        with:
+          path: backend/data/raw/1.4.4.9
+          key: corpus-1.4.4.9-${{ hashFiles('backend/scripts/build_corpus.py', 'backend/scripts/scrape_wiki.py', 'backend/scripts/scrape_cargo.py') }}
 
-      - name: Run RAG eval gate
+      # ── DB + Vault (no langfuse needed) ─────────────────────────────────────
+      # langfuse is skipped: the eval harness runs outside a request context so
+      # current_trace_var is None and no spans are emitted.
+      - name: Start DB and Vault
+        run: |
+          docker compose up -d db vault vault-init
+          timeout 60 bash -c 'until docker compose exec -T db pg_isready -U terramind; do sleep 2; done'
+
+      - name: Run migrations
+        run: docker compose run --rm migrate
+
+      # ── Build or load corpus ─────────────────────────────────────────────────
+      # Cold cache: run the full offline pipeline (scrape → cargo → build).
+      - name: Scrape + build corpus (cache miss)
+        if: steps.corpus-cache.outputs.cache-hit != 'true'
         working-directory: backend
         env:
-          DATABASE_URL: postgresql+asyncpg://terramind:terramind-dev-password@localhost:5432/terramind
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DATABASE_URL: ${{ env.DATABASE_URL }}
         run: |
-          if [ -f tests/test_eval_rag.py ]; then
-            uv run pytest tests/test_eval_rag.py -m eval -v -s --tb=short
-          else
-            echo "Phase 2.4 not reached: no RAG eval tests yet — skipping (scaffold)."
-          fi
+          uv run python -m scripts.scrape_wiki  --version 1.4.4.9
+          uv run python -m scripts.scrape_cargo --version 1.4.4.9
+          uv run python -m scripts.build_corpus --version 1.4.4.9
+
+      # Warm cache: raw data is on disk; rag_chunks is empty after fresh DB.
+      # build_corpus upserts are idempotent — safe to re-run.
+      - name: Load corpus into DB (cache hit)
+        if: steps.corpus-cache.outputs.cache-hit == 'true'
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: uv run python -m scripts.build_corpus --version 1.4.4.9
+
+      # ── Eval harness ────────────────────────────────────────────────────────
+      # pytest -m eval runs only the test_rag_retrieval_thresholds test.
+      # Exit code non-zero if any committed threshold is violated.
+      # eval_report.json is written regardless of pass/fail.
+      - name: Run RAG eval
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: uv run pytest -m eval --tb=short -q
+
+      # Upload the full per-question report as an artifact.  Essential on first
+      # baseline run (PENDING thresholds) and for regression diagnosis.
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: backend/eval_report.json
+          if-no-files-found: warn
