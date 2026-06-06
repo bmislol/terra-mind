@@ -6,7 +6,9 @@
       "Bash(uv run *)",
       "Bash(docker compose *)",
       "Bash(DATABASE_URL=\"postgresql+asyncpg://terramind_app:terramind-app-dev-password@localhost:5432/terramind\" uv run python -m app.eval.rag.harness)",
-      "Bash(DATABASE_URL=postgresql+asyncpg://terramind_app:terramind-app-dev-password@localhost:5432/terramind uv run python -c ' *)"
+      "Bash(DATABASE_URL=postgresql+asyncpg://terramind_app:terramind-app-dev-password@localhost:5432/terramind uv run python -c ' *)",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 -)"
     ]
   }
 }

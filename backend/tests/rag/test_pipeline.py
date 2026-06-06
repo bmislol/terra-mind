@@ -17,7 +17,6 @@ from uuid import uuid4
 import numpy as np
 import pytest
 
-from app.rag.embedder import Embedder
 from app.rag.pipeline import RetrievalPipeline
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -52,7 +51,14 @@ def _make_pipeline(rows: list[dict[str, Any]]) -> tuple[RetrievalPipeline, Magic
     factory = MagicMock()
     factory.return_value = session
 
-    embedder = Embedder()
+    # Mock embedder — never loads MiniLM, returns a deterministic L2-normalised
+    # 384-dim vector so test_retrieval_l2_normalize still passes.
+    fake_vec = np.zeros(384, dtype=np.float32)
+    fake_vec[0] = 1.0  # L2-norm == 1.0 by construction
+    embedder = MagicMock()
+    embedder.encode.return_value = np.array([fake_vec])
+    embedder.dim = 384
+
     pipeline = RetrievalPipeline(session_factory=factory, embedder=embedder)
     return pipeline, session
 
