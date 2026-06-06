@@ -136,6 +136,18 @@ Goal: a version-tagged wiki corpus in pgvector and a measured dense-retrieval ba
 - [x] `.github/workflows/eval-rag.yml` (manual dispatch; needs live DB).
 - [x] Decide hybrid escalation from the number (P-007): hit@5=0.667 < 0.75 → P-007 stays OPEN, forcing function documented in `DECISIONS.md`; `ARCH.md §11`, `EVALS.md §1.5–1.6` updated; tick.
 
+### Phase 2.5 · Deterministic chunk IDs + harness fixes — `fix/25-deterministic-ids`
+> Discovered during Phase 2.4 closeout: `rag_chunks.id` is a random UUID4 generated at insert time. After `docker compose down -v` the corpus rebuilds with new UUIDs, silently invalidating the golden set. This phase hardens the eval pipeline so it survives a volume wipe.
+- [ ] **Deterministic chunk IDs** — `build_corpus.py`: replace `uuid4()` with `uuid5(NAMESPACE_OID, f"{page_id}:{chunk_index}:{game_version}")`. IDs are now content-addressed; a volume wipe followed by rebuild produces identical UUIDs.
+- [ ] **Schema migration** — new Alembic migration: drop-recreate `rag_chunks.id` as deterministic UUID (or `ALTER TABLE … ALTER COLUMN id SET DEFAULT …` + backfill). `UNIQUE (page_id, chunk_index, game_version)` upsert key is unchanged.
+- [ ] **Corpus rebuild** — `docker compose down -v && up --build`, then `build_corpus.py --version 1.4.4.9`; verify chunk count still ~22,173.
+- [ ] **Rewrite `eval_rag.jsonl`** with the deterministic UUIDs; verify 35 distinct UUIDs; verify all 35 resolve in the DB.
+- [ ] **Threshold direction fix** — `harness.py` `_assert_thresholds`: `_max` keys must fail when `measured > threshold` (not `<`). Fix the comparison; add a unit test that asserts `_max` enforces an upper bound and `_min` enforces a lower bound.
+- [ ] **Refuse-to-boot on zero thresholds** — `check_eval_thresholds` in `app/core/config.py` (or equivalent): refuse to boot if any `rag.*_min` value is `0` (zero means "no gate"). `PENDING` string → skip (early-phase). Add a unit test confirming the zero-check.
+- [ ] **Unit tests** — `tests/rag/test_deterministic_ids.py`: assert `uuid5(NAMESPACE_OID, ...)` produces stable output across calls; assert two chunks with different `(page_id, chunk_index, game_version)` produce different IDs; assert rebuild idempotency (same input → same UUID).
+- [ ] **Re-run eval harness** after rebuild; confirm hit@5 = 0.667 ± 1 question; confirm exit code 0 (all thresholds pass with direction fix applied).
+- [ ] **Deliverables** — update `DECISIONS.md` (note deterministic-ID decision + motivation; threshold direction fix); update `EVALS.md §1` (golden set is now stable across volume wipes); update `RUNBOOK.md §4` (note that `build_corpus.py` produces stable IDs); tick Phase 2.5 in `Checklist.md` and update `CLAUDE.md §2`.
+
 ---
 
 ## Section 3 — Router, Agent & Class Detection (Days 5–7)
