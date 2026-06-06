@@ -191,6 +191,24 @@ Thresholds set per D-020 formula. Two questions (Q11, Q15) are complete misses d
 
 **Number / evidence:** Measured on corpus version 1.4.4.9, 22,173 chunks, HNSW m=16 ef_construction=64 ef_search=40 (pgvector default), `all-MiniLM-L6-v2` 384-dim, 15 golden questions from `backend/data/eval/eval_rag.jsonl`.
 
+### D-021 — Deterministic chunk IDs
+**Status:** Locked (2026-06-06, Phase 2.5)
+**Choice:** `rag_chunks.id` is set to `uuid5(NAMESPACE_OID, f"{page_id}:{chunk_index}:{game_version}")`. `NAMESPACE_OID` is the stdlib constant `uuid.NAMESPACE_OID` (`6ba7b812-9dad-11d1-80b4-00c04fd430c8`); no custom namespace UUID is used.
+**Why:** Phase 2.4 closeout revealed that `id = uuid4()` (previously used in `build_corpus.py`) is random on every INSERT. After `docker compose down -v`, a fresh corpus rebuild produced all-new random UUIDs, silently invalidating the golden set's `ground_truth_chunks`. The symptom was discovered in PR #11 (fix/golden-set-uuids), which patched the JSONL by hand. Phase 2.5 makes the root cause impossible: `uuid5` over the natural key `(page_id:chunk_index:game_version)` produces the same UUID for the same chunk on every build, forever. The application supplies `id` explicitly on every INSERT; no DB DEFAULT exists, so no Alembic migration was needed — TRUNCATE + rebuild was sufficient.
+**Number / evidence:** `chunk_id(page_id=42, chunk_index=3, game_version="1.4.4.9")` returns the identical UUID across two independent calls. STEP 6 of Phase 2.5 verification: `down -v` + fresh rebuild reproduced hit@5=0.667 with the same `eval_rag.jsonl` on disk (no refresh script run), proving the contract holds.
+**Migration:** one-time `scripts/refresh_golden_set.py` run against the pre-rebuild DB rewrites `data/eval/eval_rag.jsonl` with the stable UUIDs. After that run, the golden set never needs UUID refresh again.
+
+### D-022 — Threshold direction convention
+**Status:** Locked (2026-06-06, Phase 2.5)
+**Choice:** Threshold keys in `eval_thresholds.yaml` encode their comparison direction in their suffix:
+- `_min` → lower-bound floor: `measured >= threshold` passes.
+- `_max` → upper-bound ceiling: `measured <= threshold` passes.
+- Any other suffix → `ValueError` raised at evaluation time (loud failure for future contributors adding new keys).
+
+Implemented in `app/core/threshold_directions.py` (shared between the harness and the refuse-to-boot check). A `_min` or `_max` key set to `0` is also rejected at boot time (`zero_is_valid_for_key()` returns False for these), because a quality floor of 0 means "no gate." Keys with neither suffix (e.g. `redteam.max_successful_injections`) are exempt from the zero check — 0 is a valid strict floor there.
+**Why:** Phase 2.4 revealed a latent bug: `harness.py::_check` used `measured < threshold` for all keys. For `p95_latency_ms_max: 300`, a 164 ms measurement yielded `164 < 300 → True → FAILURE`. The bug was latent (eval-rag.yml is manual-dispatch, not PR-gated) but would have reported every passing latency run as a failure. The suffix convention makes direction self-documenting in the YAML key name and makes the rule machine-checked rather than comment-enforced.
+**Number / evidence:** 4 threshold keys in production YAML — 3 use `_min`, 1 uses `_max`. Unit tests in `tests/eval/rag/test_harness.py` lock the at-threshold boundary (pass) and past-threshold boundary (fail) for both directions.
+
 ---
 
 ## Pending Decisions
@@ -220,3 +238,5 @@ Open questions we know we must answer. Each graduates to a `D-NNN` once settled,
 - **2026-06-06 · D-019 (Phase 2.4 addendum):** Measured baseline — hit@5=0.667, hit@10=0.867, MRR@10=0.576, median 5.6 ms, p95 175.8 ms (first-call JIT warmup). Two questions (Q11 mage armor, Q15 post-Golem progression) are complete misses due to entity-naming gaps; see EVALS.md §1.6.
 - **2026-06-06 · D-020 (new, graduates P-003):** RAG eval thresholds locked. hit@1_min=0.35, hit@k_min (hit@5)=0.55, mrr_at_10_min=0.45, p95_latency_ms_max=300. Derivation formula floor(b×10)/10 − 0.05 stated explicitly.
 - **2026-06-06 · P-007 (Phase 2.4 update):** Dense-only hit@5=0.667 < 0.75 resolution floor. P-007 stays open. Forcing function added: dedicated hybrid phase required; escalation threshold delta ≥ 0.05 over dense-only baseline.
+- **2026-06-06 · D-021 (new, Phase 2.5):** Deterministic chunk IDs via uuid5(NAMESPACE_OID, "{page_id}:{chunk_index}:{game_version}"). Root cause: prior uuid4() generated random IDs at insert, silently invalidating the golden set on volume wipe. One-time `refresh_golden_set.py` migration run; golden set now stable permanently. STEP 6 verification: down -v + rebuild produces hit@5=0.667 with unmodified eval_rag.jsonl.
+- **2026-06-06 · D-022 (new, Phase 2.5):** Threshold direction convention locked: _min = floor (>=), _max = ceiling (<=), unknown suffix raises ValueError. Fixes latent harness bug where 164ms measured against 300ms ceiling was reported as a failure. Shared helper in app/core/threshold_directions.py used by both harness and refuse-to-boot check.

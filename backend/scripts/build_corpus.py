@@ -18,12 +18,11 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import sqlalchemy as sa
 from sqlalchemy import text
 
-from app.rag.chunker import chunk_page
+from app.rag.chunker import chunk_id, chunk_page
 from app.rag.embedder import Embedder
 from app.rag.models import ChunkRecord
 
@@ -60,7 +59,9 @@ def _upsert_chunks(
         conn.execute(
             text(_UPSERT_SQL),
             {
-                "id": str(uuid4()),
+                "id": str(
+                    chunk_id(chunk.page_id, chunk.chunk_index, chunk.game_version)
+                ),
                 "page_id": chunk.page_id,
                 "chunk_index": chunk.chunk_index,
                 "revision_id": chunk.revision_id,

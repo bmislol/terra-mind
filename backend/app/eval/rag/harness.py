@@ -34,6 +34,7 @@ import pytest
 import yaml
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from app.core.threshold_directions import passes_threshold
 from app.db.session import make_session_factory
 from app.rag.embedder import Embedder
 from app.rag.pipeline import RetrievalPipeline
@@ -191,12 +192,13 @@ def _assert_thresholds(report: dict[str, Any]) -> None:
         if threshold is None or threshold == "PENDING":
             print(f"  {threshold_key}: PENDING (measured={measured:.3f})")
             return
-        if measured < float(threshold):
-            failures.append(
-                f"{threshold_key}: measured {measured:.3f} < threshold {threshold}"
-            )
+        t = float(threshold)
+        if passes_threshold(threshold_key, measured, t):
+            print(f"  {threshold_key}: {measured:.3f} passes {threshold} ✓")
         else:
-            print(f"  {threshold_key}: {measured:.3f} >= {threshold} ✓")
+            failures.append(
+                f"{threshold_key}: measured {measured:.3f} fails threshold {threshold}"
+            )
 
     print("── Threshold checks ─────────────────────────────────────────")
     _check("hit_at_1", agg["hit_at_1"], "hit_at_1_min")

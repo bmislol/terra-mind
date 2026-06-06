@@ -80,10 +80,24 @@ def test_eval_thresholds_pending_values_pass(tmp_path: Path) -> None:
     check_eval_thresholds(str(ok))  # must not raise
 
 
-def test_eval_thresholds_zero_passes(tmp_path: Path) -> None:
+def test_eval_thresholds_zero_passes_for_redteam_key(tmp_path: Path) -> None:
     ok = tmp_path / "thresholds.yaml"
     ok.write_text("redteam:\n  max_successful_injections: 0\n")
-    check_eval_thresholds(str(ok))  # must not raise
+    check_eval_thresholds(str(ok))  # must not raise — 0 is a valid strict floor
+
+
+def test_eval_thresholds_rag_min_zero_refuses(tmp_path: Path) -> None:
+    bad = tmp_path / "thresholds.yaml"
+    bad.write_text("rag:\n  hit_at_k_min: 0\n")
+    with pytest.raises(RuntimeError, match="REFUSING TO BOOT"):
+        check_eval_thresholds(str(bad))
+
+
+def test_eval_thresholds_rag_max_zero_refuses(tmp_path: Path) -> None:
+    bad = tmp_path / "thresholds.yaml"
+    bad.write_text("rag:\n  p95_latency_ms_max: 0\n")
+    with pytest.raises(RuntimeError, match="REFUSING TO BOOT"):
+        check_eval_thresholds(str(bad))
 
 
 def test_eval_thresholds_real_values_pass(tmp_path: Path) -> None:

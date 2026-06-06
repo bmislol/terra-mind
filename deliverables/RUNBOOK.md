@@ -124,6 +124,20 @@ uv run python -m scripts.build_corpus --version <game_version>
 
 All three scripts are idempotent: re-running is safe. `scrape_wiki.py` and `scrape_cargo.py` skip already-fetched data. `build_corpus.py` uses `INSERT … ON CONFLICT … DO UPDATE` (upsert-keyed on `page_id, chunk_index, game_version`).
 
+**Chunk IDs are deterministic (Phase 2.5, D-021).** `build_corpus.py` derives every row's primary key as `uuid5(NAMESPACE_OID, f"{page_id}:{chunk_index}:{game_version}")`. The same corpus input always produces the same UUID, so `docker compose down -v` followed by a rebuild produces an identical `rag_chunks` table. The eval golden set (`data/eval/eval_rag.jsonl`) does not need to be refreshed after a volume wipe.
+
+**If you need to re-derive the golden set** (e.g. after adding new golden-set questions whose ground-truth chunks are referenced by current random UUIDs), run the refresh script against the live DB **before** `down -v`:
+
+```bash
+cd backend
+DATABASE_URL="postgresql://terramind_app:terramind-app-dev-password@localhost:5432/terramind" \
+  uv run python scripts/refresh_golden_set.py
+# Dry-run first to inspect substitutions:
+#   uv run python scripts/refresh_golden_set.py --dry-run
+```
+
+After `down -v` + rebuild the deterministic IDs will match, and the golden set is stable again.
+
 After `build_corpus` completes, `manifest.json` contains:
 `page_count`, `raw_sha256`, `cargo_scraped_at`, `cargo_raw_sha256`, `cargo_table_counts`, `chunk_count`, `embedding_model`, `embedding_dim`.
 
@@ -175,6 +189,8 @@ CI: `eval-rag.yml` is manual-dispatch (needs DB); `eval-redteam.yml` runs on rel
 docker compose down -v    # wipes Postgres, Redis, Vault, Langfuse volumes
 ```
 After reset: re-run §1 (startup), §3 (operator bootstrap), §4 (corpus build).
+
+**The corpus rebuild after a wipe produces deterministic chunk IDs (D-021).** The eval golden set does not need to be refreshed — `eval_rag.jsonl` on disk already contains the stable UUIDs. Run `§5.1` immediately after `§4` to verify hit@5 = 0.667 with no changes to any other file.
 
 ## 7. Demo Flow
 
