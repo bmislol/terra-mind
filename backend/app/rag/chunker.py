@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import html as html_lib
 import re
+import uuid
 from typing import Any
 
 import mwparserfromhell
@@ -42,6 +43,19 @@ _MIN_TOKENS = 20
 
 # Broken bar (U+00A6) — the separator in Cargo's `args` field.
 BROKEN_BAR = "¦"
+
+
+# ── Stable chunk identity ─────────────────────────────────────────────────────
+
+
+def chunk_id(page_id: int, chunk_index: int, game_version: str) -> uuid.UUID:
+    """Return the deterministic UUID for a chunk.
+
+    Uses uuid5(NAMESPACE_OID, "{page_id}:{chunk_index}:{game_version}") so the
+    same corpus input always produces the same row ID, surviving volume wipes.
+    NAMESPACE_OID is the stdlib constant uuid.NAMESPACE_OID — no custom namespace.
+    """
+    return uuid.uuid5(uuid.NAMESPACE_OID, f"{page_id}:{chunk_index}:{game_version}")
 
 
 # ── Public entry point ────────────────────────────────────────────────────────

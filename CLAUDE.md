@@ -28,7 +28,7 @@ Tenant isolation is enforced by Postgres Row-Level Security; a short-lived JWT c
 
 **Execution Rule:** Always act as a technical planner first. For any non-trivial task, propose a step-by-step plan and wait for approval before writing code. Once approved, write the code.
 
-**Status:** Phases 1.1–2.4 merged. **Section 2 (Corpus & RAG) complete.** Phase 2.4 delivered: `app/rag/pipeline.py` (dense-only retrieval, async, HNSW, version-filtered), eval harness (`app/eval/rag/harness.py`), `eval-rag.yml` (manual-dispatch workflow), 91 tests green. Measured baseline: hit@5=0.667, MRR@10=0.576, 5.6 ms median latency; thresholds committed (D-020). P-007 (hybrid escalation) stays open — hit@5 below 0.75 floor. **Section 3 (Router, Agent & Class Detection) next.** Start with Phase 3.1 (classifier router).
+**Status:** Phases 1.1–2.5 complete. **Section 2 (Corpus & RAG) fully closed.** Phase 2.5 delivered: deterministic chunk IDs via `uuid5(NAMESPACE_OID, …)` (D-021); golden set survives `down -v` permanently (verified STEP 6); threshold direction convention `_min`/`_max` locked (D-022); harness latency direction bug fixed; `app/core/threshold_directions.py` shared helper; `scripts/refresh_golden_set.py` one-time migration script; 115 tests green. **Section 3 (Router, Agent & Class Detection) next.** Start with Phase 3.1 (classifier router) on `feat/11-router`.
 
 Before suggesting any work, read these files in order:
 1. `Checklist.md` — granular phase-by-phase progress; the source of truth for *what to build next*. **You maintain this file** — update it whenever a phase starts or finishes.

@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import get_settings
+from app.core.threshold_directions import zero_is_valid_for_key
 from app.db.session import make_session_factory
 from app.infra.tracing import init_langfuse
 from app.infra.vault import load_secrets
@@ -23,7 +24,9 @@ def _walk_thresholds(node: Any, prefix: str) -> None:  # noqa: ANN401
     - "PENDING" passes (intentional unfilled marker).
     - Any other non-numeric value refuses.
     - Any numeric value < 0 refuses.
-    - 0 passes (valid floor, e.g. max_successful_injections).
+    - 0 is valid only for keys where zero_is_valid_for_key() returns True
+      (e.g. redteam.max_successful_injections). For _min and _max keys, 0
+      means "no quality gate" and refuses.
     """
     if isinstance(node, dict):
         for k, v in node.items():
@@ -34,6 +37,12 @@ def _walk_thresholds(node: Any, prefix: str) -> None:  # noqa: ANN401
         if node < 0:
             raise RuntimeError(
                 f"REFUSING TO BOOT: eval_thresholds.yaml — {prefix}={node} is negative"
+            )
+        leaf_key = prefix.rsplit(".", 1)[-1]
+        if node == 0 and not zero_is_valid_for_key(leaf_key):
+            raise RuntimeError(
+                f"REFUSING TO BOOT: eval_thresholds.yaml — {prefix}=0 "
+                "sets no quality floor (use PENDING if not yet measured)"
             )
     else:
         raise RuntimeError(

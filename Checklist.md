@@ -136,17 +136,22 @@ Goal: a version-tagged wiki corpus in pgvector and a measured dense-retrieval ba
 - [x] `.github/workflows/eval-rag.yml` (manual dispatch; needs live DB).
 - [x] Decide hybrid escalation from the number (P-007): hit@5=0.667 < 0.75 → P-007 stays OPEN, forcing function documented in `DECISIONS.md`; `ARCH.md §11`, `EVALS.md §1.5–1.6` updated; tick.
 
-### Phase 2.5 · Deterministic chunk IDs + harness fixes — `fix/25-deterministic-ids`
+### Phase 2.5 · Deterministic chunk IDs + harness fixes — `feat/11-eval-robustness`
 > Discovered during Phase 2.4 closeout: `rag_chunks.id` is a random UUID4 generated at insert time. After `docker compose down -v` the corpus rebuilds with new UUIDs, silently invalidating the golden set. This phase hardens the eval pipeline so it survives a volume wipe.
-- [ ] **Deterministic chunk IDs** — `build_corpus.py`: replace `uuid4()` with `uuid5(NAMESPACE_OID, f"{page_id}:{chunk_index}:{game_version}")`. IDs are now content-addressed; a volume wipe followed by rebuild produces identical UUIDs.
-- [ ] **Schema migration** — new Alembic migration: drop-recreate `rag_chunks.id` as deterministic UUID (or `ALTER TABLE … ALTER COLUMN id SET DEFAULT …` + backfill). `UNIQUE (page_id, chunk_index, game_version)` upsert key is unchanged.
-- [ ] **Corpus rebuild** — `docker compose down -v && up --build`, then `build_corpus.py --version 1.4.4.9`; verify chunk count still ~22,173.
-- [ ] **Rewrite `eval_rag.jsonl`** with the deterministic UUIDs; verify 35 distinct UUIDs; verify all 35 resolve in the DB.
-- [ ] **Threshold direction fix** — `harness.py` `_assert_thresholds`: `_max` keys must fail when `measured > threshold` (not `<`). Fix the comparison; add a unit test that asserts `_max` enforces an upper bound and `_min` enforces a lower bound.
-- [ ] **Refuse-to-boot on zero thresholds** — `check_eval_thresholds` in `app/core/config.py` (or equivalent): refuse to boot if any `rag.*_min` value is `0` (zero means "no gate"). `PENDING` string → skip (early-phase). Add a unit test confirming the zero-check.
-- [ ] **Unit tests** — `tests/rag/test_deterministic_ids.py`: assert `uuid5(NAMESPACE_OID, ...)` produces stable output across calls; assert two chunks with different `(page_id, chunk_index, game_version)` produce different IDs; assert rebuild idempotency (same input → same UUID).
-- [ ] **Re-run eval harness** after rebuild; confirm hit@5 = 0.667 ± 1 question; confirm exit code 0 (all thresholds pass with direction fix applied).
-- [ ] **Deliverables** — update `DECISIONS.md` (note deterministic-ID decision + motivation; threshold direction fix); update `EVALS.md §1` (golden set is now stable across volume wipes); update `RUNBOOK.md §4` (note that `build_corpus.py` produces stable IDs); tick Phase 2.5 in `Checklist.md` and update `CLAUDE.md §2`.
+- [x] **Deterministic chunk IDs** — `app/rag/chunker.py`: add `chunk_id(page_id, chunk_index, game_version)` helper using `uuid5(NAMESPACE_OID, …)`. `build_corpus.py`: replace `uuid4()` with `chunk_id(…)`. IDs are now content-addressed; a volume wipe followed by rebuild produces identical UUIDs (D-021).
+- ~~**Schema migration**~~ — *struck; incorrect. The application supplies `id` explicitly on every INSERT; there is no DB DEFAULT to change. TRUNCATE + rebuild is the correct reset procedure — no Alembic migration needed.*
+- [x] **Corpus rebuild** — `docker compose down -v && up --build`, then `build_corpus.py --version 1.4.4.9`; chunk count confirmed 22,173 exactly (STEP 3 + STEP 6).
+- [x] **Rewrite `eval_rag.jsonl`** with the deterministic UUIDs via `scripts/refresh_golden_set.py` (run once against the pre-rebuild DB). All 35 UUIDs resolve in the new DB (STEP 4).
+- [x] **Threshold direction fix** — `app/core/threshold_directions.py` (shared helper, D-022); `harness.py` `_assert_thresholds` delegates to `passes_threshold(key, measured, threshold)`. `_max` keys now correctly fail when `measured > threshold`; `_min` keys fail when `measured < threshold`.
+- [x] **Refuse-to-boot on zero thresholds** — `app/core/lifespan.py` `_walk_thresholds`: tightened using `zero_is_valid_for_key(leaf_key)` from the shared helper. `rag.*_min: 0` and `rag.*_max: 0` now refuse to boot; `redteam.max_successful_injections: 0` still passes.
+- [x] **Unit tests** — `tests/rag/test_chunker.py` (3 deterministic-ID tests); `tests/eval/rag/test_harness.py` (11 tests: `passes_threshold` + `_assert_thresholds` integration); `tests/scripts/test_refresh_golden_set.py` (8 tests); `tests/test_refuse_to_boot.py` (2 new refuse-on-zero tests).
+- [x] **Re-run eval harness** after rebuild; hit@5 = 0.667 exactly; exit code 0; threshold checks all pass including `p95_latency_ms_max` (STEP 5 + STEP 6). Per-question pattern identical to Phase 2.4 baseline.
+- [x] **Deliverables** — `DECISIONS.md` D-021 + D-022 added; `EVALS.md §1.7` (golden-set stability guarantee + threshold direction fix); `RUNBOOK.md §4 + §6` (deterministic IDs, refresh script, post-wipe guarantee); `Checklist.md` ticked; `CLAUDE.md §2` updated.
+- [x] Mock embedder in unit tests (tests/rag/test_pipeline.py).
+      Currently the test instantiates a real SentenceTransformer which
+      blocks CI on HuggingFace Hub download/rate-limits. CI runs hung
+      for 13+ minutes on PR #26 because of this. Add a pytest fixture
+      that returns a deterministic 384-dim numpy array.
 
 ---
 

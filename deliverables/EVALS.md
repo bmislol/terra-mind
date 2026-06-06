@@ -1,10 +1,10 @@
 # EVALS.md
 
-Last updated: 2026-06-06 (Phase 2.4)
+Last updated: 2026-06-06 (Phase 2.5)
 
 Two golden gates protect `main`: **RAG retrieval** and **red-team safety**. A separate **redaction test** sits on the same blocking-merge tier. Thresholds live in `eval_thresholds.yaml` at the repo root; a regression below threshold blocks merge, and the `api` refuses to boot if any threshold is zero or missing.
 
-> **Phase 2.4 status.** RAG baseline measured 2026-06-06. Thresholds committed in `eval_thresholds.yaml` (D-020). Red-team gate remains PENDING until Phase 6.1.
+> **Phase 2.5 status.** Golden-set UUIDs are now deterministic (D-021). Threshold direction convention locked (D-022). Harness latency direction bug fixed. Red-team gate remains PENDING until Phase 6.1.
 
 ---
 
@@ -76,7 +76,17 @@ Questions that are complete misses (hit@10 = 0): Q11, Q15. See §1.6.
 
 **Q11** ("What armor should a Mage use after defeating Plantera?") and **Q15** ("After defeating Golem, what should I do next to progress toward the final boss?") consistently fail dense retrieval (hit@10 = 0). The cause is that neither query names its answer entity: Q11 needs "Spectre" and Q15 needs "Lunatic Cultist," both of which are absent from the query text. MiniLM lacks the game-domain knowledge to bridge these gaps. These failures cannot be resolved by retrieval alone; they require query rewriting or HyDE-style hypothetical-answer expansion, which D-008 rejects on latency grounds. **Future improvement path:** Phase 3.1's classifier router detects entity-free queries and either prompts the LLM to expand the query, or routes to a slower hybrid path.
 
-### 1.7 CI Gate
+### 1.7 Golden-Set Stability (Phase 2.5)
+
+**The golden set survives `docker compose down -v` permanently.** Prior to Phase 2.5, `rag_chunks.id` was a random `uuid4()` generated at INSERT time. A volume wipe followed by corpus rebuild silently assigned new random UUIDs, invalidating `eval_rag.jsonl`'s `ground_truth_chunks`. This required a manual UUID refresh after every wipe (symptom: PR #11).
+
+After Phase 2.5, `id` is `uuid5(NAMESPACE_OID, f"{page_id}:{chunk_index}:{game_version}")` (D-021). The same corpus input always produces the same UUID. **Verification (STEP 6):** `down -v` + fresh rebuild reproduced hit@5=0.667 with the same `eval_rag.jsonl` on disk — no refresh script run, no golden-set edits.
+
+The one-time migration script (`scripts/refresh_golden_set.py`) was run before the Phase 2.5 rebuild to translate the pre-existing random UUIDs to their deterministic equivalents. It does not need to be run again unless the corpus content for a chunk changes (which changes neither `page_id`, `chunk_index`, nor `game_version`, so it would not affect the ID in any case).
+
+**Threshold direction fix (D-022).** The `p95_latency_ms_max` threshold was silently broken before Phase 2.5: `_check()` used `measured < threshold` for all keys, so a 164 ms measurement against a 300 ms ceiling reported as a failure (`164 < 300 → fail`). Fixed in Phase 2.5; the harness now delegates to `passes_threshold()` from `app/core/threshold_directions.py`, which applies `<=` for `_max` keys and `>=` for `_min` keys.
+
+### 1.8 CI Gate
 
 Job: `.github/workflows/eval-rag.yml` — **manual dispatch only**. The gate needs a live pgvector DB with the indexed corpus; spinning that up on every PR would add fragile minutes per run. The maintainer runs it before merging any PR touching `app/rag/`, the golden set, or `eval_thresholds.yaml`. PR-time CI (lint/type/unit) skips eval tests automatically (they are marked `-m eval`).
 

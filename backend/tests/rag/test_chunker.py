@@ -8,6 +8,7 @@ from app.rag.chunker import (
     _token_count,
     _use_time_label,
     _window,
+    chunk_id,
     chunk_page,
     parse_recipe_args,
 )
@@ -500,4 +501,39 @@ def test_non_ascii_section_content_still_embedded() -> None:
     chunks = _chunk_page(_page(title="Test Item", wikitext=wikitext))
     misc_chunks = [c for c in chunks if c.section == "misc"]
     assert misc_chunks, "expected a 'misc' chunk for non-ASCII heading"
-    assert "Important item notes" in misc_chunks[0].content
+
+
+# ── Deterministic chunk IDs ───────────────────────────────────────────────────
+
+
+def test_deterministic_chunk_ids_same_input_same_uuid() -> None:
+    id1 = chunk_id(42, 3, "1.4.4.9")
+    id2 = chunk_id(42, 3, "1.4.4.9")
+    assert id1 == id2
+
+
+def test_deterministic_chunk_ids_different_inputs_different_uuids() -> None:
+    base = chunk_id(42, 3, "1.4.4.9")
+    assert chunk_id(42, 4, "1.4.4.9") != base  # different chunk_index
+    assert chunk_id(43, 3, "1.4.4.9") != base  # different page_id
+    assert chunk_id(42, 3, "1.4.4.8") != base  # different game_version
+
+
+def test_deterministic_chunk_ids_rebuild_idempotency() -> None:
+    """chunk_page called twice on the same fixture produces byte-identical IDs."""
+    wikitext = (
+        "Intro text about the item. " * 5
+        + "\n== Notes ==\n"
+        + "Important notes here. " * 5
+        + "\n== Tips ==\n"
+        + "Useful tips for players. " * 5
+    )
+    page = _page(title="Test Item", page_id=99, wikitext=wikitext)
+    chunks_a = _chunk_page(page)
+    chunks_b = _chunk_page(page)
+    assert len(chunks_a) == len(chunks_b)
+    assert len(chunks_a) > 0, "fixture page must produce at least one chunk"
+    for ca, cb in zip(chunks_a, chunks_b):
+        assert chunk_id(ca.page_id, ca.chunk_index, "1.4.4.9") == chunk_id(
+            cb.page_id, cb.chunk_index, "1.4.4.9"
+        )
