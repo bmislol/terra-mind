@@ -156,19 +156,236 @@ Goal: a version-tagged wiki corpus in pgvector and a measured dense-retrieval ba
 ---
 
 ## Section 3 — Router, Agent & Class Detection (Days 5–7)
-> _Outline — expand into closeout lists when reached._
 
-### Phase 3.1 · Classifier router — `feat/11-router`
-- Goal: route easy FAQ → deterministic RAG; hard state-dependent → agent (ARCH §5 step 5).
-- Touches: `app/services/router.py`, `app/prompts/`. Done-when: both paths exercised by a test.
+Goal: the FastAPI backend produces real answers. The retrieval pipeline
+from Phase 2.4 becomes useful via a router that picks between deterministic
+RAG and an agent that calls tools. Class detection from live game state
+is the third leg. This is the first section that calls Anthropic's API,
+so every phase has real per-token costs.
 
-### Phase 3.2 · Bounded agent + tools — `feat/12-agent`
-- Goal: LangGraph bounded loop with `query_wiki`, `analyze_loadout`, `suggest_next_boss`; iteration cap (graduate P-008).
-- Touches: `app/agent/`, `app/prompts/`, `DECISIONS`. Done-when: a hard query produces tool-grounded advice within the loop cap; trace shows the spans.
+**Pre-section flight check (do before starting Phase 3.1):**
+- [ ] Anthropic API key is real, not the placeholder. Set
+      `ANTHROPIC_API_KEY=sk-ant-...` in `.env` (gitignored). Confirm
+      Vault picks it up at boot: `docker compose exec api env | grep -i
+      anthropic` shows the real value masked, NOT the placeholder string.
+- [ ] First-call smoke test from inside the api container:
+      `docker compose exec api uv run python -c "from anthropic import
+      Anthropic; print(Anthropic().models.list().data[0].id)"` — should
+      print a model ID without erroring.
+- [ ] Set a usage cap in your Anthropic console before Section 3 starts.
+      Suggested: $20 for the whole section. If you hit the cap, something
+      is wrong with the agent's loop, not the cap.
+- [ ] Confirm Langfuse can record an LLM generation (not just spans):
+      Section 2.4 only opened spans; Section 3 records `generation` events
+      with model name, input tokens, output tokens. The Langfuse Python
+      SDK's `trace.generation(...)` API. Verify in Phase 3.1 below.
 
-### Phase 3.3 · Live-state ingestion + class detection — `feat/13-state-class`
-- Goal: state-payload schema; `analyze_loadout` infers class from equipped gear; LLM zero-shot cold-start fallback (D-009).
-- Touches: `app/domain/`, `app/agent/`. Done-when: a mocked state payload yields correct class + progression-aware answer.
+---
+
+### Phase 3.1 · Classifier router + `/bot/ask` endpoint — `feat/12-router`
+
+**Goal:** First end-to-end answer. The `/bot/ask` endpoint accepts a
+question + state payload, classifies it into one of two paths (easy FAQ
+→ deterministic RAG; hard state-dependent → agent stub), routes
+accordingly, and returns a single JSON reply. The agent path is a stub
+here (returns "agent not yet implemented"); 3.2 fills it in. Both paths
+exercise a full Langfuse trace tree.
+
+**This phase is bigger than its outline suggested** — it's the first
+real Anthropic call, the first `/bot/ask` endpoint, the first router
+prompt, and the first end-to-end trace. Treat it as the foundation for
+3.2 and 3.3.
+
+#### Closeout
+- [ ] Endpoint scaffolding: `app/api/bot.py` with `POST /bot/ask`.
+      Request body schema: `{message: str, state: StatePayload | None}`.
+      `StatePayload` is a Pydantic model from `app/domain/` matching
+      ARCH.md §5 step 1 (gear, inventory, hardmode, downed bosses,
+      biome, game_version). For Phase 3.1 it can be optional/stub —
+      the router doesn't use it yet.
+- [ ] Router prompt: `app/prompts/router.md`. System prompt + few-shot
+      examples that classify the user's question into `"faq"` (single
+      lookup; "Megashark damage" "Wooden Sword recipe") or `"agent"`
+      (multi-step, state-dependent; "why do I keep dying to Skeletron",
+      "what should I do next"). Versioned prompt file, loaded at runtime.
+- [ ] Router service: `app/services/router.py`. Single LLM call to
+      `claude-haiku-4-5` (D-003) with the router prompt + user question.
+      Parses the classification result. **No state payload in the
+      router prompt** — the router just decides the path, doesn't
+      consume state. Returns a `RoutingDecision` enum.
+- [ ] FAQ path: when router returns "faq", call the
+      `RetrievalPipeline.retrieve()` from Phase 2.4 with the user
+      question + `game_version` from state (default to `"1.4.4.9"`
+      if state is absent), top-1 chunk. **Single LLM call to
+      synthesize an answer from the chunk** — this is where the user
+      actually gets a response. Prompt template:
+      `app/prompts/faq_answer.md`. Model: claude-haiku-4-5. Returns
+      `{answer: str, source_chunks: list[ChunkRef]}`.
+- [ ] Agent path stub: when router returns "agent", return a placeholder
+      `{answer: "I need more analysis — agent path coming in Phase 3.2",
+      source_chunks: []}`. The path is exercised by tests but Section
+      3.2 fills it in.
+- [ ] Anthropic SDK integration: `app/infra/anthropic.py`. Async client
+      loaded at lifespan startup, key from Vault. Wraps the SDK with
+      Langfuse generation tracing — every LLM call must emit a
+      `trace.generation()` event with `model`, `input`, `output`,
+      `input_tokens`, `output_tokens` so the cost trail is visible.
+- [ ] Langfuse trace tree (the graded "traces are real" check): one
+      trace per `/bot/ask` request. Spans: `router.classify`,
+      `rag.retrieve` (already from 2.4), `faq.synthesize` or
+      `agent.stub`. Each LLM call is a `generation` event under the
+      relevant span. Verify in the Langfuse UI by sending two
+      questions (one of each path) and inspecting both traces.
+- [ ] Unit tests: `tests/services/test_router.py` with mock Anthropic.
+      Cover both routing decisions, malformed LLM output handling, and
+      timeout behavior. `tests/api/test_bot_ask.py` exercises the
+      endpoint end-to-end with mocked LLM calls.
+- [ ] Integration test (manual, not in CI): send a real `/bot/ask`
+      request with `{message: "What does Megashark damage?", state:
+      null}` and confirm a coherent answer with `damage: 25` in it.
+      Send `{message: "Why do I keep dying to Skeletron?"}` and confirm
+      the agent-stub response.
+- [ ] DECISIONS.md: Lock the router model choice with rationale.
+      Likely D-023 — claude-haiku-4-5 for routing (latency matters).
+      Cost: ~$0.001 per classification call.
+- [ ] EVALS.md: Note that router accuracy will be measured in Phase 6
+      (guardrails phase) as part of the broader red-team / accuracy
+      eval — don't build a separate router eval suite here.
+- [ ] ARCH.md §5: Update the data flow to reflect the actual
+      implementation; PENDING steps from §5 now have real code.
+- [ ] RUNBOOK.md §7 (demo flow): step 3 (`/bot why do I keep dying`)
+      now has a real answer path; step 4 (Langfuse trace tree) shows
+      a real trace.
+- [ ] Checklist.md Phase 3.1 ticked.
+- [ ] CLAUDE.md §2 status updated.
+
+---
+
+### Phase 3.2 · Bounded LangGraph agent + tools — `feat/13-agent`
+
+**Goal:** The agent path from 3.1 produces real tool-grounded answers.
+A LangGraph bounded loop with three tools: `query_wiki` (RAG),
+`analyze_loadout` (reads state, returns class + progression stage),
+`suggest_next_boss` (reads state + progression, returns recommendation).
+Iteration cap graduates P-008.
+
+**The biggest LLM phase in the project.** Each agent turn may make
+3-8 LLM calls (router + agent reasoning + N tool calls + final
+synthesis). Watch the cost per turn carefully.
+
+#### Closeout
+- [ ] LangGraph setup: `app/agent/graph.py`. Bounded loop with
+      `StateGraph`. Nodes: `plan_step`, `execute_tool`,
+      `synthesize_answer`. Edges enforce loop cap (P-008 — pick a
+      number; my guess is 5-8 iterations).
+- [ ] Agent prompt: `app/prompts/agent_system.md`. Instructs the LLM
+      to call tools to gather information before answering, to cite
+      retrieved chunks in its final answer, to refuse if it can't
+      ground a claim.
+- [ ] Tool: `query_wiki(query: str, game_version: str, k: int = 5)` —
+      wraps `RetrievalPipeline.retrieve()`. Returns chunks as a JSON
+      list the LLM can read.
+- [ ] Tool: `analyze_loadout(state: StatePayload)` — reads equipped
+      gear, returns the canonical class (Melee/Ranger/Mage/Summoner)
+      using deterministic rules. Pure Python, no LLM call. Cold-start
+      fallback (no gear equipped) defers to Phase 3.3's LLM zero-shot.
+- [ ] Tool: `suggest_next_boss(state: StatePayload)` — reads
+      `downed_bosses` and `hardmode` flags from state, returns the
+      next progression target as a string. Pure Python decision tree.
+- [ ] Iteration cap enforcement: agent gracefully degrades if it hits
+      the cap without converging. Returns a "best-effort" answer from
+      whatever chunks it gathered, plus a warning. Graduates P-008
+      to D-NNN with the chosen number.
+- [ ] Langfuse spans: every tool call is its own span under the agent
+      span. The full trace tree for a hard question now shows
+      `router.classify → agent.plan → agent.tool_call (query_wiki) →
+      rag.retrieve → agent.plan → agent.tool_call (analyze_loadout) →
+      agent.synthesize`. This is the "agent debugging is miserable
+      without traces" claim made real.
+- [ ] Unit tests: `tests/agent/test_graph.py` — mocked LLM responses
+      drive the graph through pre-baked tool-call sequences. Cover:
+      single-tool path, multi-tool path, loop-cap-reached path.
+      `tests/agent/test_tools.py` covers the three tools in isolation
+      with fixture state payloads.
+- [ ] Integration test (manual, not in CI): send the canonical hard
+      question `"why do I keep dying to Skeletron?"` with a state
+      payload showing the player has pre-Hardmode gear, no Skeletron
+      defeated, low HP. The agent should retrieve Skeletron strategy
+      chunks, analyze the loadout's class, and synthesize a
+      progression-aware answer. Watch the Langfuse trace.
+- [ ] Cost measurement: send 10 hard queries through the agent, record
+      median tokens per turn and median cost. Document in EVALS.md as
+      operational baseline (not a hard gate).
+- [ ] DECISIONS.md: D-NNN graduating P-008 (loop cap) with the chosen
+      iteration count and the cost-per-turn measurement. Possibly a
+      D-NNN documenting the three-tool choice with rationale (why
+      these three, why not more).
+- [ ] ARCH.md §5: update the agent step with the real tool list and
+      loop bounds.
+- [ ] Checklist 3.2 ticked + CLAUDE.md §2.
+
+---
+
+### Phase 3.3 · State payload + LLM zero-shot class fallback — `feat/14-state-class`
+
+**Goal:** The state-payload schema is finalized, `analyze_loadout`
+correctly infers class from real gear data, and the cold-start
+fallback (LLM zero-shot from an onboarding questionnaire) is wired
+in. Resolves D-009.
+
+**Smaller phase than 3.2.** Mostly schema work + tightening
+`analyze_loadout` against more realistic state fixtures.
+
+#### Closeout
+- [ ] State payload schema finalization: `app/domain/state.py`.
+      `StatePayload` Pydantic model with fields:
+        - `game_version: str`
+        - `class StateGear`: `armor: list[ItemRef]`, `accessories:
+          list[ItemRef]`, `held_item: ItemRef | None`
+        - `inventory: list[ItemRef]` (top 20 or so by stack/value)
+        - `stats: PlayerStats` (HP, MP, defense)
+        - `world: WorldState` (`hardmode: bool`, `downed_bosses:
+          dict[str, bool]`, `biome: str`)
+      The schema must match what the tModLoader client will produce
+      in Phase 4.2 — talk to that phase's plan before locking the
+      schema.
+- [ ] `ItemRef`: `{item_id: int, name: str, prefix: str | None,
+      stack: int}`. `item_id` is the Terraria internal ID (matches
+      Cargo `Items.itemid`).
+- [ ] `analyze_loadout` rule set: deterministic class inference
+      from equipped gear. Examples:
+        - Full Spectre armor + magic weapon → Mage
+        - Hallowed Ranger Helmet + ranger accessories + Megashark →
+          Ranger
+        - No armor + Copper Shortsword (new character) → defer to
+          LLM zero-shot
+      The rules are encoded in Python, not in a prompt. The Cargo
+      `Items.listcat` ("Ranged weapons", "Magic weapons",
+      "Summoning") helps but isn't authoritative on its own.
+- [ ] Cold-start LLM zero-shot: when `analyze_loadout` returns
+      "unknown" (e.g., new character with no real gear), the agent
+      calls the LLM with the state payload + an onboarding prompt
+      ("based on this player's inventory and recent actions, what
+      class are they leaning toward?"). Returns one of the four
+      classes. This satisfies D-009's stated fallback path.
+- [ ] Test fixtures: `tests/agent/fixtures/states/` with realistic
+      JSON state payloads for each class at multiple progression
+      stages (pre-boss Ranger, post-Skeletron Mage, etc.).
+      `test_class_detection.py` covers each fixture and asserts the
+      expected class.
+- [ ] Tests for the LLM fallback path: mocked LLM responses cover
+      ambiguous loadouts (mixed gear) and confirm the fallback
+      reports a class plus a confidence indication.
+- [ ] DECISIONS.md: graduate D-009 from "deferred to future" status
+      to "implemented as described." The class detection F1 *is not*
+      measured here — there's no labelled dataset and the brief
+      explicitly said this was non-grading. Document this in EVALS.md
+      §3 (the existing "class detection sanity check, not a gate"
+      note) with the actual fixture results.
+- [ ] ARCH.md §5: state payload section now has real schema; remove
+      "PENDING" marks.
+- [ ] Checklist 3.3 ticked + CLAUDE.md §2 → "Section 3 complete;
+      Section 4 (auth & game client) next."
 
 ---
 
