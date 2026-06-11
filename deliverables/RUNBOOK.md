@@ -207,6 +207,41 @@ _(Filled in Phase 7.2 as a numbered click-through.)_ Target order:
 ### 7.1 Fallback if the live game demo breaks
 Use the **Streamlit admin test chat** to exercise the exact `/bot/ask` path with a hand-entered state payload — the full router → agent → RAG path runs without launching Terraria.
 
+### 7.2 Smoke test: POST /bot/ask (Phase 3.1+)
+
+Run these two commands before any demo to verify the full stack — Vault, Anthropic API key, pgvector retrieval, and Langfuse tracing — is healthy.
+
+**FAQ path** — should return a grounded answer with `"routing": "faq"` and a `source_chunks` entry:
+```bash
+curl -s -X POST http://localhost:8000/bot/ask \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What damage does the Megashark do?"}' \
+  | python3 -m json.tool
+```
+
+**Agent path** — should return the stub answer with `"routing": "agent"` and an empty `source_chunks`:
+```bash
+curl -s -X POST http://localhost:8000/bot/ask \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Why do I keep dying to Skeletron?"}' \
+  | python3 -m json.tool
+```
+
+Both traces appear in the Langfuse UI at http://localhost:3001 within a few seconds. The FAQ trace shows `bot.ask → router.classify → router.llm` and `faq.answer → rag.retrieve + faq.llm`; the agent trace shows `bot.ask → router.classify → router.llm + agent.stub`.
+
+**Troubleshooting — REFUSING TO BOOT on Anthropic key:**
+If `api` refuses to boot with `"REFUSING TO BOOT: Anthropic API key is missing or placeholder"`, the Vault-seeded value is a placeholder or empty:
+```bash
+# Confirm the real key is in .env (gitignored):
+grep ANTHROPIC_API_KEY .env   # must start with sk-ant-
+
+# Re-seed Vault and restart api:
+docker compose up -d --force-recreate vault-init
+sleep 5
+docker compose up -d api
+docker compose logs api --tail=15   # expect startup to reach "Langfuse auth OK"
+```
+
 ## 8. Common Issues
 
 - **Langfuse race on fresh boot.** After `up -d` (esp. post `down -v`), `api` may refuse to boot before Langfuse accepts connections. Wait ~20s and `docker compose up -d api`.

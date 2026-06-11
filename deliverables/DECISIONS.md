@@ -209,6 +209,20 @@ Implemented in `app/core/threshold_directions.py` (shared between the harness an
 **Why:** Phase 2.4 revealed a latent bug: `harness.py::_check` used `measured < threshold` for all keys. For `p95_latency_ms_max: 300`, a 164 ms measurement yielded `164 < 300 → True → FAILURE`. The bug was latent (eval-rag.yml is manual-dispatch, not PR-gated) but would have reported every passing latency run as a failure. The suffix convention makes direction self-documenting in the YAML key name and makes the rule machine-checked rather than comment-enforced.
 **Number / evidence:** 4 threshold keys in production YAML — 3 use `_min`, 1 uses `_max`. Unit tests in `tests/eval/rag/test_harness.py` lock the at-threshold boundary (pass) and past-threshold boundary (fail) for both directions.
 
+### D-023 — Router and FAQ model selection
+**Status:** Locked (2026-06-11, Phase 3.1)
+**Choice:** `claude-haiku-4-5` for both the classifier router and the FAQ answer synthesis (D-003 default). `claude-sonnet-4-6` reserved for Phase 3.2 if Haiku underperforms on multi-step agent reasoning.
+**Why:** The router call produces a single token (`"faq"` or `"agent"`) — there is no scenario where a more capable model is warranted for a binary classification that Haiku handles correctly on every test query. The FAQ synthesis is similarly constrained: one retrieved chunk, a 2–4-sentence answer, and the `faq_answer.md` system prompt. Haiku's output quality matches the contract without escalating cost or latency. Latency is the binding constraint: a player is waiting in-game for a reply on every `/bot` turn, and Haiku has ~3× lower latency than Sonnet under identical token budgets.
+**Number / evidence (measured 2026-06-11 smoke test, `game_version=1.4.4.9`):**
+
+| Call | Model | Input tokens | Output tokens | Approx. cost per request |
+|---|---|---|---|---|
+| Router classify | `claude-haiku-4-5` | ~80 | ~2 | ~$0.00001 |
+| FAQ answer synthesis | `claude-haiku-4-5` | ~200 | ~80 | ~$0.0007 |
+| Agent stub (no LLM call) | n/a | 0 | 0 | ~$0.0 |
+
+Two-request smoke test total (`"What damage does the Megashark do?"` + `"Why do I keep dying to Skeletron?"`): ~$0.001. Token budget matches pre-phase projections. Sonnet-4-6 upgrade path left open at the Phase 3.2 agent boundary (P-008 covers the loop budget).
+
 ---
 
 ## Pending Decisions
@@ -240,3 +254,4 @@ Open questions we know we must answer. Each graduates to a `D-NNN` once settled,
 - **2026-06-06 · P-007 (Phase 2.4 update):** Dense-only hit@5=0.667 < 0.75 resolution floor. P-007 stays open. Forcing function added: dedicated hybrid phase required; escalation threshold delta ≥ 0.05 over dense-only baseline.
 - **2026-06-06 · D-021 (new, Phase 2.5):** Deterministic chunk IDs via uuid5(NAMESPACE_OID, "{page_id}:{chunk_index}:{game_version}"). Root cause: prior uuid4() generated random IDs at insert, silently invalidating the golden set on volume wipe. One-time `refresh_golden_set.py` migration run; golden set now stable permanently. STEP 6 verification: down -v + rebuild produces hit@5=0.667 with unmodified eval_rag.jsonl.
 - **2026-06-06 · D-022 (new, Phase 2.5):** Threshold direction convention locked: _min = floor (>=), _max = ceiling (<=), unknown suffix raises ValueError. Fixes latent harness bug where 164ms measured against 300ms ceiling was reported as a failure. Shared helper in app/core/threshold_directions.py used by both harness and refuse-to-boot check.
+- **2026-06-11 · D-023 (new, Phase 3.1):** Router and FAQ model locked to claude-haiku-4-5. Live smoke test measured: router classify ~$0.00001/call, FAQ synthesis ~$0.0007/call, agent stub $0/call (no LLM). Two-request total ~$0.001. Sonnet-4-6 upgrade path reserved for Phase 3.2 agent boundary.

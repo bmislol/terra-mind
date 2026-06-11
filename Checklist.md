@@ -197,23 +197,23 @@ prompt, and the first end-to-end trace. Treat it as the foundation for
 3.2 and 3.3.
 
 #### Closeout
-- [ ] Endpoint scaffolding: `app/api/bot.py` with `POST /bot/ask`.
+- [x] Endpoint scaffolding: `app/api/bot.py` with `POST /bot/ask`.
       Request body schema: `{message: str, state: StatePayload | None}`.
       `StatePayload` is a Pydantic model from `app/domain/` matching
       ARCH.md §5 step 1 (gear, inventory, hardmode, downed bosses,
       biome, game_version). For Phase 3.1 it can be optional/stub —
       the router doesn't use it yet.
-- [ ] Router prompt: `app/prompts/router.md`. System prompt + few-shot
+- [x] Router prompt: `app/prompts/router.md`. System prompt + few-shot
       examples that classify the user's question into `"faq"` (single
       lookup; "Megashark damage" "Wooden Sword recipe") or `"agent"`
       (multi-step, state-dependent; "why do I keep dying to Skeletron",
       "what should I do next"). Versioned prompt file, loaded at runtime.
-- [ ] Router service: `app/services/router.py`. Single LLM call to
+- [x] Router service: `app/services/router.py`. Single LLM call to
       `claude-haiku-4-5` (D-003) with the router prompt + user question.
       Parses the classification result. **No state payload in the
       router prompt** — the router just decides the path, doesn't
       consume state. Returns a `RoutingDecision` enum.
-- [ ] FAQ path: when router returns "faq", call the
+- [x] FAQ path: when router returns "faq", call the
       `RetrievalPipeline.retrieve()` from Phase 2.4 with the user
       question + `game_version` from state (default to `"1.4.4.9"`
       if state is absent), top-1 chunk. **Single LLM call to
@@ -221,43 +221,37 @@ prompt, and the first end-to-end trace. Treat it as the foundation for
       actually gets a response. Prompt template:
       `app/prompts/faq_answer.md`. Model: claude-haiku-4-5. Returns
       `{answer: str, source_chunks: list[ChunkRef]}`.
-- [ ] Agent path stub: when router returns "agent", return a placeholder
-      `{answer: "I need more analysis — agent path coming in Phase 3.2",
-      source_chunks: []}`. The path is exercised by tests but Section
-      3.2 fills it in.
-- [ ] Anthropic SDK integration: `app/infra/anthropic.py`. Async client
+- [x] Agent path stub: when router returns "agent", return a player-facing
+      stub message (`app/services/agent_stub.py::_STUB_MESSAGE`). The path
+      is exercised by tests; Phase 3.2 fills in the real LangGraph agent.
+- [x] Anthropic SDK integration: `app/infra/anthropic.py`. Async client
       loaded at lifespan startup, key from Vault. Wraps the SDK with
-      Langfuse generation tracing — every LLM call must emit a
-      `trace.generation()` event with `model`, `input`, `output`,
-      `input_tokens`, `output_tokens` so the cost trail is visible.
-- [ ] Langfuse trace tree (the graded "traces are real" check): one
-      trace per `/bot/ask` request. Spans: `router.classify`,
-      `rag.retrieve` (already from 2.4), `faq.synthesize` or
-      `agent.stub`. Each LLM call is a `generation` event under the
-      relevant span. Verify in the Langfuse UI by sending two
-      questions (one of each path) and inspecting both traces.
-- [ ] Unit tests: `tests/services/test_router.py` with mock Anthropic.
-      Cover both routing decisions, malformed LLM output handling, and
-      timeout behavior. `tests/api/test_bot_ask.py` exercises the
-      endpoint end-to-end with mocked LLM calls.
-- [ ] Integration test (manual, not in CI): send a real `/bot/ask`
-      request with `{message: "What does Megashark damage?", state:
-      null}` and confirm a coherent answer with `damage: 25` in it.
-      Send `{message: "Why do I keep dying to Skeletron?"}` and confirm
-      the agent-stub response.
-- [ ] DECISIONS.md: Lock the router model choice with rationale.
-      Likely D-023 — claude-haiku-4-5 for routing (latency matters).
-      Cost: ~$0.001 per classification call.
-- [ ] EVALS.md: Note that router accuracy will be measured in Phase 6
-      (guardrails phase) as part of the broader red-team / accuracy
-      eval — don't build a separate router eval suite here.
-- [ ] ARCH.md §5: Update the data flow to reflect the actual
-      implementation; PENDING steps from §5 now have real code.
-- [ ] RUNBOOK.md §7 (demo flow): step 3 (`/bot why do I keep dying`)
-      now has a real answer path; step 4 (Langfuse trace tree) shows
-      a real trace.
-- [ ] Checklist.md Phase 3.1 ticked.
-- [ ] CLAUDE.md §2 status updated.
+      Langfuse generation tracing — every LLM call emits a
+      `obs.generation()` event with `model`, `input`, `output`,
+      `usage_details` so the cost trail is visible.
+- [x] Langfuse trace tree (the graded "traces are real" check): one
+      trace per `/bot/ask` request. Verified in live smoke test:
+      `http_request → bot.ask → router.classify → router.llm` and
+      `faq.answer → rag.retrieve + faq.llm`. Both traces confirmed
+      in Langfuse UI.
+- [x] Unit tests: `tests/services/test_router.py` (7 tests),
+      `tests/services/test_faq.py` (4 tests),
+      `tests/api/test_bot_ask.py` (4 tests),
+      `tests/infra/test_anthropic.py` (4 tests). 142/142 total pass.
+- [x] Integration test (manual, not in CI): smoke test passed 2026-06-11.
+      FAQ question returned grounded Megashark damage answer with correct
+      source_chunks; agent question returned stub response. ~$0.001 total.
+- [x] DECISIONS.md: D-023 — claude-haiku-4-5 locked for router + FAQ.
+      Measured costs from live smoke test. Sonnet-4-6 reserved for 3.2.
+- [x] EVALS.md: Router accuracy deferred to Phase 6 (guardrails phase)
+      as part of the red-team / accuracy eval — no separate router eval
+      suite in Phase 3.1. (Noted in EVALS.md §2.)
+- [x] ARCH.md §5: Updated — steps 5, 7, 10–11 marked implemented;
+      steps 1–4, 6, 8–9 annotated with their pending phase.
+- [x] RUNBOOK.md §7.2: Smoke test procedure with two curl commands
+      (FAQ + agent paths) and Anthropic refuse-to-boot troubleshooting.
+- [x] Checklist.md Phase 3.1 ticked.
+- [x] CLAUDE.md §2 status updated.
 
 ---
 

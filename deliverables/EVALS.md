@@ -101,6 +101,8 @@ cd backend && DATABASE_URL="postgresql+asyncpg://..." uv run pytest -m eval --tb
 
 The second gate. Proves the guardrail layer blocks misuse.
 
+> **Router accuracy (Phase 3.1 note).** There is no separate router eval suite. Classifier router accuracy (does it correctly label FAQ vs agent?) will be measured in Phase 6.1 as part of the broader red-team / accuracy eval — a question misrouted to the agent stub is a mild degradation, not a safety failure, and Phase 6.1 is the right gate for it. Do not add a separate `eval_thresholds.yaml` key for router accuracy before Phase 6.
+
 ### 2.1 Red-Team Set
 
 - Stored at `backend/app/eval/redteam/redteam_set.jsonl`.

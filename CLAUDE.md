@@ -28,7 +28,7 @@ Tenant isolation is enforced by Postgres Row-Level Security; a short-lived JWT c
 
 **Execution Rule:** Always act as a technical planner first. For any non-trivial task, propose a step-by-step plan and wait for approval before writing code. Once approved, write the code.
 
-**Status:** Phases 1.1–2.5 complete. **Section 2 (Corpus & RAG) fully closed.** Phase 2.5 delivered: deterministic chunk IDs via `uuid5(NAMESPACE_OID, …)` (D-021); golden set survives `down -v` permanently (verified STEP 6); threshold direction convention `_min`/`_max` locked (D-022); harness latency direction bug fixed; `app/core/threshold_directions.py` shared helper; `scripts/refresh_golden_set.py` one-time migration script; 115 tests green. **Section 3 (Router, Agent & Class Detection) next.** Start with Phase 3.1 (classifier router) on `feat/11-router`.
+**Status:** Phases 1.1–3.1 complete. **Phase 3.1 delivered:** `POST /bot/ask` endpoint live; classifier router (`app/services/router.py`) + FAQ synthesis path (`app/services/faq.py`) producing real Anthropic answers; agent path stubbed (`app/services/agent_stub.py`); `app/infra/anthropic.py` with Langfuse generation tracing; refuse-to-boot on missing/placeholder Anthropic key and short prompt files; D-023 locked (claude-haiku-4-5 for router + FAQ, measured ~$0.001/two-request smoke test); Langfuse trace tree verified live; 142/142 tests green. **Section 3 continues with Phase 3.2 (bounded LangGraph agent) next** on `feat/13-agent`.
 
 Before suggesting any work, read these files in order:
 1. `Checklist.md` — granular phase-by-phase progress; the source of truth for *what to build next*. **You maintain this file** — update it whenever a phase starts or finishes.
