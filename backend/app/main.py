@@ -6,11 +6,13 @@ configure_logging()
 
 from fastapi import FastAPI  # noqa: E402
 
+from app.api.bot import bot_router  # noqa: E402
 from app.api.middleware import RequestContextMiddleware  # noqa: E402
 from app.core.lifespan import lifespan  # noqa: E402
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(RequestContextMiddleware)
+app.include_router(bot_router)
 
 
 @app.get("/healthz")

@@ -132,19 +132,19 @@ This boundary is graded. Expect to be asked to add a new endpoint or agent tool 
 
 ## 5. Core Data Flow: One `/bot` Turn
 
-_Status: design (target flow; phases fill it in)._
+_Status: partial (Phase 3.1). Steps 5, 7, 10–11 implemented; steps 1–4, 6, 8–9 pending their respective phases._
 
-1. In game, the player types `/bot <question>`. The mod (`client/`) collects a **state payload**: equipped armor set + held weapon + accessories, inventory summary, `Main.hardMode`, the `NPC.downed*` boss flags, current biome, and the tenant's selected `game_version`.
-2. The mod presents its identity (see §6 / P-005) to `POST /client/token` and receives a short-lived JWT. It POSTs `{message, state}` to `POST /bot/ask` with the Bearer token.
-3. `app/api/bot.py` authenticates, and `services` sets the **RLS tenant context** on the session from the JWT's `tenant_id`.
-4. **Guardrails input check** (`app/guardrails/`): block prompt-injection / progression jailbreaks ("give me dev items") before any LLM call.
-5. **Classifier router** (`app/services/router.py`): an easy FAQ ("Copper Shortsword recipe?") goes to a deterministic RAG flow; a hard, state-dependent query ("why do I keep dying to Skeletron?") goes to the agent.
-6. **Bounded agent** (`app/agent/`, LangGraph): runs up to **MAX_ROUNDS** iterations (value → P-008) over tools `query_wiki` (RAG, version-filtered), `analyze_loadout` (reads the state payload), `suggest_next_boss`.
-7. **RAG retrieval** (`app/rag/`): dense query against the shared corpus, filtered to the tenant's selected `game_version` (D-005, D-008).
-8. **Short-term memory** (`app/memory/`): the current session's recent turns are loaded from Redis and the new turn appended, under TTL (§8, P-004).
-9. **Guardrails output check**: scan the drafted reply before it leaves the boundary.
-10. The whole turn runs under one Langfuse span opened in step 3 (§12.1).
-11. `POST /bot/ask` returns a **single JSON reply** (the game chat renders one message via `Main.NewText` — SSE streaming into a game chat line is unnecessary here; the Streamlit test chat in §13.1 may stream for development convenience).
+1. In game, the player types `/bot <question>`. The mod (`client/`) collects a **state payload**: equipped armor set + held weapon + accessories, inventory summary, `Main.hardMode`, the `NPC.downed*` boss flags, current biome, and the tenant's selected `game_version`. _(Phase 4.2 — design)_
+2. The mod presents its identity (see §6 / P-005) to `POST /client/token` and receives a short-lived JWT. It POSTs `{message, state}` to `POST /bot/ask` with the Bearer token. _(Phase 4.1/4.3 — design)_
+3. `app/api/bot.py` authenticates, and `services` sets the **RLS tenant context** on the session from the JWT's `tenant_id`. _(Phase 4.1 — `app/api/bot.py` exists without auth; JWT + RLS context deferred)_
+4. **Guardrails input check** (`app/guardrails/`): block prompt-injection / progression jailbreaks ("give me dev items") before any LLM call. _(Phase 6.1 — design)_
+5. **Classifier router** (`app/services/router.py`): an easy FAQ ("Copper Shortsword recipe?") goes to a deterministic RAG flow; a hard, state-dependent query ("why do I keep dying to Skeletron?") goes to the agent. _(Phase 3.1 — **implemented**; single LLM call to `claude-haiku-4-5`, D-023)_
+6. **Bounded agent** (`app/agent/`, LangGraph): runs up to **MAX_ROUNDS** iterations (value → P-008) over tools `query_wiki` (RAG, version-filtered), `analyze_loadout` (reads the state payload), `suggest_next_boss`. _(Phase 3.2 — agent path is a stub in 3.1; real LangGraph agent deferred)_
+7. **RAG retrieval** (`app/rag/`): dense query against the shared corpus, filtered to the tenant's selected `game_version` (D-005, D-008). _(Phase 2.4 — **implemented**; `app/rag/pipeline.py`, dense-only, HNSW)_
+8. **Short-term memory** (`app/memory/`): the current session's recent turns are loaded from Redis and the new turn appended, under TTL (§8, P-004). _(Phase 3.4+ — design)_
+9. **Guardrails output check**: scan the drafted reply before it leaves the boundary. _(Phase 6.1 — design)_
+10. The whole turn runs under one Langfuse trace opened per request by `RequestContextMiddleware`; router, RAG, and LLM calls are child spans. _(Phase 3.1 — **implemented**; trace tree verified: `http_request → bot.ask → router.classify → router.llm / faq.answer → rag.retrieve + faq.llm`)_
+11. `POST /bot/ask` returns a **single JSON reply** (the game chat renders one message via `Main.NewText` — SSE streaming into a game chat line is unnecessary here; the Streamlit test chat in §13.1 may stream for development convenience). _(Phase 3.1 — **implemented**; `app/api/bot.py`, no auth gate yet)_
 
 ## 6. Authentication, Authorization & Tenancy
 
@@ -171,16 +171,16 @@ First operator is bootstrapped via a script (RUNBOOK §3).
 
 ## 7. Endpoint Inventory
 
-_Status: design. Phase tags added as endpoints land._
+_Status: partial (Phase 3.1). Phase tags in Notes column._
 
 | Method | Endpoint | Roles | Notes |
 |---|---|---|---|
-| `POST` | `/auth/jwt/login` | Public | fastapi-users login; returns `access_token`. |
-| `POST` | `/auth/register` | Public | Player self-registration (no email verification). |
-| `POST` | `/auth/guest` | Public | Create an ephemeral guest tenant. |
-| `POST` | `/client/token` | Player | Exchange game-client identity (P-005) for a short-lived JWT. |
-| `GET` | `/healthz` | Public | Liveness probe. |
-| `POST` | `/bot/ask` | Player | Send `{message, state}`; returns a single JSON advice reply. |
+| `POST` | `/auth/jwt/login` | Public | fastapi-users login; returns `access_token`. _(Phase 4.1)_ |
+| `POST` | `/auth/register` | Public | Player self-registration (no email verification). _(Phase 4.1)_ |
+| `POST` | `/auth/guest` | Public | Create an ephemeral guest tenant. _(Phase 4.1)_ |
+| `POST` | `/client/token` | Player | Exchange game-client identity (P-005) for a short-lived JWT. _(Phase 4.1)_ |
+| `GET` | `/healthz` | Public | Liveness probe. _(implemented Phase 1.3)_ |
+| `POST` | `/bot/ask` | Player (no auth yet) | Send `{message, state}`; returns a single JSON advice reply. **Implemented Phase 3.1** — router + FAQ path live; agent path stubbed; auth gate deferred to Phase 4.1. |
 | `GET` | `/versions` | Player | List available wiki corpus versions. |
 | `GET` | `/me/preferences` | Player | Read own preferences (incl. selected version). |
 | `PATCH` | `/me/preferences` | Player | Update preferences. |

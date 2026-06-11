@@ -4,7 +4,12 @@ from pathlib import Path
 import pytest
 
 from app.core.config import Settings
-from app.core.lifespan import check_eval_thresholds
+from app.core.lifespan import (
+    _load_prompts,
+    _validate_anthropic_key,
+    check_eval_thresholds,
+)
+from app.core.prompts import LoadedPrompts
 from app.infra.tracing import init_langfuse
 from app.infra.vault import load_secrets
 
@@ -98,6 +103,67 @@ def test_eval_thresholds_rag_max_zero_refuses(tmp_path: Path) -> None:
     bad.write_text("rag:\n  p95_latency_ms_max: 0\n")
     with pytest.raises(RuntimeError, match="REFUSING TO BOOT"):
         check_eval_thresholds(str(bad))
+
+
+# ── Anthropic key validation ──────────────────────────────────────────────────
+
+
+def test_validate_anthropic_key_empty_refuses() -> None:
+    with pytest.raises(RuntimeError, match="REFUSING TO BOOT"):
+        _validate_anthropic_key("")
+
+
+def test_validate_anthropic_key_placeholder_refuses() -> None:
+    with pytest.raises(RuntimeError, match="REFUSING TO BOOT"):
+        _validate_anthropic_key("CHANGE_ME")
+
+
+def test_validate_anthropic_key_valid_passes() -> None:
+    _validate_anthropic_key("sk-ant-fake-key")  # must not raise
+
+
+# ── Prompts loading ───────────────────────────────────────────────────────────
+
+_LONG_CONTENT = "A" * 100  # exactly 100 chars — valid
+
+
+def test_load_prompts_missing_router_refuses(tmp_path: Path) -> None:
+    (tmp_path / "faq_answer.md").write_text(_LONG_CONTENT, encoding="utf-8")
+    # router.md absent
+    with pytest.raises(RuntimeError, match="REFUSING TO BOOT"):
+        _load_prompts(tmp_path)
+
+
+def test_load_prompts_missing_faq_answer_refuses(tmp_path: Path) -> None:
+    (tmp_path / "router.md").write_text(_LONG_CONTENT, encoding="utf-8")
+    # faq_answer.md absent
+    with pytest.raises(RuntimeError, match="REFUSING TO BOOT"):
+        _load_prompts(tmp_path)
+
+
+def test_load_prompts_router_empty_refuses(tmp_path: Path) -> None:
+    (tmp_path / "router.md").write_text("too short", encoding="utf-8")
+    (tmp_path / "faq_answer.md").write_text(_LONG_CONTENT, encoding="utf-8")
+    with pytest.raises(RuntimeError, match="REFUSING TO BOOT"):
+        _load_prompts(tmp_path)
+
+
+def test_load_prompts_faq_empty_refuses(tmp_path: Path) -> None:
+    (tmp_path / "router.md").write_text(_LONG_CONTENT, encoding="utf-8")
+    (tmp_path / "faq_answer.md").write_text("too short", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="REFUSING TO BOOT"):
+        _load_prompts(tmp_path)
+
+
+def test_load_prompts_both_present_passes(tmp_path: Path) -> None:
+    router_text = "R" * 120
+    faq_text = "F" * 150
+    (tmp_path / "router.md").write_text(router_text, encoding="utf-8")
+    (tmp_path / "faq_answer.md").write_text(faq_text, encoding="utf-8")
+    result = _load_prompts(tmp_path)
+    assert isinstance(result, LoadedPrompts)
+    assert result.router == router_text
+    assert result.faq_answer == faq_text
 
 
 def test_eval_thresholds_real_values_pass(tmp_path: Path) -> None:

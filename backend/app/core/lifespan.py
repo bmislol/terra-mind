@@ -9,12 +9,16 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import get_settings
+from app.core.prompts import LoadedPrompts
 from app.core.threshold_directions import zero_is_valid_for_key
 from app.db.session import make_session_factory
+from app.infra.anthropic import AnthropicClient
 from app.infra.tracing import init_langfuse
 from app.infra.vault import load_secrets
 from app.rag.embedder import Embedder
 from app.rag.pipeline import RetrievalPipeline
+
+_PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 
 def _walk_thresholds(node: Any, prefix: str) -> None:  # noqa: ANN401
@@ -51,6 +55,31 @@ def _walk_thresholds(node: Any, prefix: str) -> None:  # noqa: ANN401
         )
 
 
+def _validate_anthropic_key(key: str) -> None:
+    if not key or not key.startswith("sk-ant-"):
+        raise RuntimeError(
+            "REFUSING TO BOOT: Anthropic API key is missing or placeholder — "
+            "seed a real sk-ant-… key in Vault at "
+            "secret/terra-mind/anthropic (field: api_key)"
+        )
+
+
+def _load_prompts(prompts_dir: Path) -> LoadedPrompts:
+    loaded: dict[str, str] = {}
+    for attr, filename in (("router", "router.md"), ("faq_answer", "faq_answer.md")):
+        path = prompts_dir / filename
+        if not path.exists():
+            raise RuntimeError(f"REFUSING TO BOOT: prompt file missing — {path}")
+        content = path.read_text(encoding="utf-8")
+        if len(content.strip()) < 100:
+            raise RuntimeError(
+                f"REFUSING TO BOOT: prompt file {path.name} is empty or too short "
+                f"(got {len(content.strip())} chars, need ≥ 100)"
+            )
+        loaded[attr] = content
+    return LoadedPrompts(router=loaded["router"], faq_answer=loaded["faq_answer"])
+
+
 def check_eval_thresholds(path: str) -> None:
     resolved = Path(path)
     if not resolved.exists():
@@ -73,6 +102,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ── Vault ──────────────────────────────────────────────────────────────────
     secrets = load_secrets(settings)
     app.state.secrets = secrets
+
+    # ── Anthropic ──────────────────────────────────────────────────────────────
+    _validate_anthropic_key(secrets.anthropic_api_key)
+    app.state.anthropic = AnthropicClient(api_key=secrets.anthropic_api_key)
+
+    # ── Prompts ────────────────────────────────────────────────────────────────
+    app.state.prompts = _load_prompts(_PROMPTS_DIR)
 
     # ── Eval thresholds ────────────────────────────────────────────────────────
     check_eval_thresholds(settings.eval_thresholds_path)

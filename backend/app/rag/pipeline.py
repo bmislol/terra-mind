@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Any
 from uuid import UUID
 
 from pgvector import Vector
@@ -71,6 +72,7 @@ class RetrievalPipeline:
         game_version: str,
         k: int = 5,
         tenant_id: str | None = None,
+        parent_observation: Any = None,
     ) -> list[RetrievedChunk]:
         """Return the top-k most similar chunks for *query* in *game_version*.
 
@@ -123,11 +125,16 @@ class RetrievalPipeline:
         ]
 
         # ── Langfuse span ─────────────────────────────────────────────────────
-        # current_trace_var is None outside a request context (eval harness,
-        # scripts).  Guard so the pipeline is usable without FastAPI.
-        trace = current_trace_var.get()
-        if trace is not None:
-            span = trace.span(
+        # parent_observation lets a calling service nest this span under its own
+        # span (e.g. faq.answer > rag.retrieve).  Falls back to the request-level
+        # trace from current_trace_var for standalone calls (eval harness, scripts).
+        obs: Any = (
+            parent_observation
+            if parent_observation is not None
+            else current_trace_var.get()
+        )
+        if obs is not None:
+            span = obs.span(
                 name="rag.retrieve",
                 input={
                     "query": query,
