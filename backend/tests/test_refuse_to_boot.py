@@ -155,15 +155,34 @@ def test_load_prompts_faq_empty_refuses(tmp_path: Path) -> None:
         _load_prompts(tmp_path)
 
 
-def test_load_prompts_both_present_passes(tmp_path: Path) -> None:
+def test_load_prompts_missing_agent_system_refuses(tmp_path: Path) -> None:
+    (tmp_path / "router.md").write_text(_LONG_CONTENT, encoding="utf-8")
+    (tmp_path / "faq_answer.md").write_text(_LONG_CONTENT, encoding="utf-8")
+    # agent_system.md absent
+    with pytest.raises(RuntimeError, match="REFUSING TO BOOT"):
+        _load_prompts(tmp_path)
+
+
+def test_load_prompts_agent_system_empty_refuses(tmp_path: Path) -> None:
+    (tmp_path / "router.md").write_text(_LONG_CONTENT, encoding="utf-8")
+    (tmp_path / "faq_answer.md").write_text(_LONG_CONTENT, encoding="utf-8")
+    (tmp_path / "agent_system.md").write_text("too short", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="REFUSING TO BOOT"):
+        _load_prompts(tmp_path)
+
+
+def test_load_prompts_all_present_passes(tmp_path: Path) -> None:
     router_text = "R" * 120
     faq_text = "F" * 150
+    agent_text = "A" * 110
     (tmp_path / "router.md").write_text(router_text, encoding="utf-8")
     (tmp_path / "faq_answer.md").write_text(faq_text, encoding="utf-8")
+    (tmp_path / "agent_system.md").write_text(agent_text, encoding="utf-8")
     result = _load_prompts(tmp_path)
     assert isinstance(result, LoadedPrompts)
     assert result.router == router_text
     assert result.faq_answer == faq_text
+    assert result.agent_system == agent_text
 
 
 def test_eval_thresholds_real_values_pass(tmp_path: Path) -> None:

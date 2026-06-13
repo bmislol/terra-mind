@@ -127,7 +127,7 @@ Job: `.github/workflows/eval-redteam.yml` — **PR-triggered**, no DB needed (it
 
 ## 3. Class-Detection Sanity Check (not a gate)
 
-Class detection is live gear-read + LLM zero-shot (D-009), not a trained model, so it has no F1 gate. A lightweight fixture test (`tests/test_class_detection.py`) asserts that a handful of hand-built state payloads (full ranger set + Megashark → Ranger; full mage set + spell tome → Mage; empty new character → LLM zero-shot path) resolve to the expected class. This is correctness, not a quality threshold.
+Class detection is live gear-read + LLM zero-shot (D-009), not a trained model, so it has no F1 gate. As of Phase 3.2 the sanity check lives in `tests/agent/test_tools.py` (8 `analyze_loadout` fixtures): full melee/ranger/mage/summoner loadouts each resolve to the expected class with `high`/`medium` confidence; an empty new-character payload and an unknown-gear payload both return `class=None` with `needs_llm_fallback=True` (the LLM zero-shot cold-start path, wired in Phase 3.3). This is correctness, not a quality threshold. Note: in Phase 3.2 `analyze_loadout` uses a hardcoded item→class dict; Phase 3.3 makes it Cargo-aware (D-009) — the fixtures lock the behavioural contract across that change.
 
 ---
 

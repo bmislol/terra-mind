@@ -8,7 +8,14 @@
       "Bash(DATABASE_URL=\"postgresql+asyncpg://terramind_app:terramind-app-dev-password@localhost:5432/terramind\" uv run python -m app.eval.rag.harness)",
       "Bash(DATABASE_URL=postgresql+asyncpg://terramind_app:terramind-app-dev-password@localhost:5432/terramind uv run python -c ' *)",
       "Bash(python3 -c ' *)",
-      "Bash(python3 -)"
+      "Bash(python3 -)",
+      "Bash(pip index *)",
+      "Bash(curl -s https://pypi.org/pypi/langgraph/json)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('latest:', d['info']['version']\\)\")",
+      "Bash(uv add *)",
+      "Bash(pip install *)",
+      "Bash(pip download *)",
+      "Bash(python3 -c \"import importlib.metadata; print\\('\\\\n'.join\\(importlib.metadata.requires\\('langgraph'\\) or []\\)\\)\")"
     ]
   }
 }
