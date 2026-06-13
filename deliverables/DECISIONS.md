@@ -223,6 +223,32 @@ Implemented in `app/core/threshold_directions.py` (shared between the harness an
 
 Two-request smoke test total (`"What damage does the Megashark do?"` + `"Why do I keep dying to Skeletron?"`): ~$0.001. Token budget matches pre-phase projections. Sonnet-4-6 upgrade path left open at the Phase 3.2 agent boundary (P-008 covers the loop budget).
 
+### D-024 — Agent bounded-loop iteration cap (graduated from P-008)
+**Status:** Locked (2026-06-12, Phase 3.2)
+**Choice:** `MAX_ITERATIONS = 5` in `app/agent/graph.py`. The bounded LangGraph loop is `START → plan → (execute_tools | END)`; `execute_tools → (plan | synthesize_cap)`; the cap bounds the number of `plan → execute_tools` cycles. Tool roster finalized at **three**: `query_wiki` (version-filtered RAG, D-008), `analyze_loadout` (reads the state payload, hardcoded item→class dict in 3.2 → Cargo-aware in 3.3 per D-009), `suggest_next_boss` (deterministic progression tree). This resolves both halves of P-008 — tool-set finalization and the iteration cap.
+**Why:** Empirically **1–3 iterations suffice for all 10 tested hard questions** (Phase 3.2 eval run, 12 Jun 2026); 5 gives conservative headroom without uncontrolled cost. Worst case is 6 LLM calls per turn (5 planning calls + 1 forced `synthesize_cap` synthesis), ~$0.01–0.02 (D-025).
+**Important caveat — cap semantics (document explicitly):** `MAX_ITERATIONS` bounds the `plan → execute_tools` **cycle** count, **not** the total number of tool dispatches. `execute_tools` dispatches *every* `tool_use` block present in a single assistant message and increments `iteration_count` by exactly 1 per node visit — so one iteration can fan out to multiple tool calls. Total tool dispatches per `/bot/ask` can therefore exceed 5: in the eval set **Q05** (Summoner vs Moon Lord, full late-game state) accumulated 30 chunks = **6 `query_wiki` dispatches within ≤ 5 iterations**.
+**Future polish (P-012):** if per-call cost becomes a concern, add a separate cap on total `chunks_seen` length (or a token ceiling) to bound the largest possible context size — the dominant cost driver per D-025, which `MAX_ITERATIONS` alone does not bound.
+**Number / evidence:** MAX_ITERATIONS=5; 3 tools; 1–3 iterations observed across 10 eval questions; worst observed 6 tool dispatches (Q05). Recommendation after measurement: **keep 5**.
+
+### D-025 — Agent cost & latency profile
+**Status:** Locked (2026-06-12, Phase 3.2)
+**Choice / finding:** Measured profile of the agent path (`claude-haiku-4-5`, D-023) from the 10-question evaluation run (`scripts/measure_agent_cost.py`, 12 Jun 2026 16:42 UTC).
+**Number / evidence (measured 2026-06-12, `game_version=1.4.4.9`):**
+
+| Metric | Value |
+|---|---|
+| Total cost, 10 agent calls | $0.07–0.09 |
+| Median cost per `/bot/ask` | ~$0.005 |
+| p95 cost per `/bot/ask` | ~$0.020 (Q05, cap-pressing summoner question) |
+| Median latency | ~7 s |
+| p95 latency | ~13 s (Q05) |
+| Anthropic console totals over the run | 66,832 input tok / 4,105 output tok |
+
+Per-question chunk accumulation / `query_wiki` dispatches / latency: **Q05** 30/6/12.7s · **Q11** 15/3/8.1s · **Q07** 15/3/9.7s · **Q09** 15/3/9.6s · **Q10** 10/2/8.6s · **Q03** 5/1/6.1s · **Q04** 5/1/4.6s · **Q15** 0/0 (`suggest_next_boss` only, no wiki retrieval)/4.6s · **Q06** 0/0/4.1s · **Q08** routed to FAQ (1 chunk, 2.1s) — confirms the router sends a pure recipe question to the deterministic path even with state present. Q15's empty `source_chunks` is expected behaviour, not a bug: the agent answered the progression question from `suggest_next_boss` + LLM knowledge without a `query_wiki` call on that turn.
+**Cost methodology:** exact per-trace token counts are **unavailable in the Langfuse UI (P-009)**; cost is computed from the Anthropic console total token delta over the run at Haiku pricing ($0.80/M input + $4.00/M output, D-023). The credit-balance delta for the day was $13.77 → $13.68 = $0.09, of which ~$0.07 is the run itself (token-derived) and the remainder is same-day smoke-test overhead. `AnthropicClient` receives correct counts from the SDK — only the Langfuse display is affected.
+**Token-cost growth:** input cost grows roughly **linear-to-quadratic with iteration count** — each subsequent planning call re-sends the accumulated tool results (chunk text) as context, so input tokens compound across iterations. This is why a cap on `chunks_seen` length (P-012) is the natural cost lever, not just the iteration count.
+
 ---
 
 ## Pending Decisions
@@ -235,9 +261,25 @@ Open questions we know we must answer. Each graduates to a `D-NNN` once settled,
 | P-005 | **Singleplayer tenant identity** — what the mod exchanges for a JWT when there is no multiplayer server ID | auth + client phase | n/a (design decision; documented rationale) |
 | P-006 | Guardrail rule set, LLM-judge prompt, and red-team set composition | guardrails phase | red-team pass rate (target: 0 successful injections) |
 | P-007 | Whether to escalate to hybrid retrieval (depends on D-008) | dedicated follow-up phase after Section 3 | dense vs dense+BM25 hit@k delta (see note below) |
-| P-008 | Agent tool set finalization + bounded-loop iteration cap | agent phase | max iterations (a number) + tool count |
+| P-009 | Langfuse 2.60.10 UI does not display token usage | observability polish phase | n/a (UI bug; SDK sends correct data) |
+| P-010 | Per-request agent-graph compilation → cache compiled graph on `app.state` | agent polish phase | compile cost saved (~50 ms/call) |
+| P-011 | Game-client backend URL: `localhost` (player runs stack locally) vs hosted | auth + client phase | n/a (design decision; documented rationale) |
+| P-012 | Cap on total `chunks_seen` length to bound agent context cost | agent polish phase | max chunks / input-token ceiling |
+| P-013 | Open nested per-iteration spans inside agent graph nodes for a tighter Langfuse trace hierarchy | observability polish phase | n/a (trace-structure polish) |
+
+_P-008 graduated to D-024 (Phase 3.2): tool roster finalized at 3, MAX_ITERATIONS=5._
 
 **P-007 status note (Phase 2.4):** Dense-only hit@5 baseline = 0.667, below the 0.75 resolution floor (D-008). P-007 stays open. The forcing function: a dedicated follow-up phase runs the same eval harness against dense+BM25 (RRF fusion). The escalation decision rule is: **dense+BM25 must improve hit@5 by ≥ 0.05 over the dense-only baseline (i.e. hit@5 ≥ 0.717) to be adopted.** Below that delta, the added latency and complexity is not justified and dense-only stays in production. Phase 2.4 ships dense-only with the measured thresholds (D-020). The two complete misses (Q11, Q15) are caused by entity-naming gaps that BM25 also cannot fix — see EVALS.md §1.6.
+
+**P-009 note (Langfuse token display, Phase 3.2):** The Langfuse Python SDK accepts usage data via three formats — `usage_details` dict (modern API), `usage` dict (legacy API), and `usage=ModelUsage(...)` (older API). All three were tested against Langfuse **2.60.10**; data is sent but the trace UI consistently renders "0 prompt → 0 completion (∑ 0)" on every generation event. Application code receives correct token counts from the Anthropic SDK (`AnthropicClient.chat_with_tools` returns them) — only the UI display is affected. Resolution path: upgrade Langfuse to a newer 2.x/3.x release in a future observability-polish phase. Until then, per-trace token measurement falls back to Anthropic console totals divided by call counts (the D-025 methodology).
+
+**P-010 note (cached agent graph, Phase 3.2):** `app/services/agent.py` calls `build_agent_graph(...)` on every `/bot/ask` agent-path request. The compile cost is ~50 ms + transient memory; acceptable at project scale and demo load. Future optimization: build the graph once at lifespan and cache it on `app.state` — the retrieval pipeline, Anthropic client, and prompts are already process-singletons, so the graph closure is stable across requests. Not done in 3.2 to keep the service-layer contract simple and avoid premature optimization.
+
+**P-011 note (game-client backend URL, Phase 4):** In singleplayer the player may run the full stack locally (`http://localhost:8000`, confirmed reachable from inside tModLoader — RUNBOOK §9) or point the mod at a hosted backend. The choice affects the mod's default config and the backend's CORS posture. Decided in the auth + client phase. (Formerly an unregistered informal reference in RUNBOOK §9; registered here in Phase 3.2 for ID hygiene.)
+
+**P-012 note (chunks_seen length cap, Phase 3.2):** D-025 shows agent input-token cost grows roughly linear-to-quadratic with iteration count, because accumulated tool results re-enter context on each planning call. A cap on total `chunks_seen` length (or an input-token ceiling) would bound the worst case more directly than `MAX_ITERATIONS` alone (D-024). Deferred; revisit if per-call cost exceeds the D-025 p95 (~$0.020).
+
+**P-013 note (agent trace nesting, Phase 3.2):** The 3.2 agent graph does not open per-iteration spans (`agent.plan_iter_N`, `agent.tool_call`). Each `chat_with_tools` generation event and each `rag.retrieve` span are flat siblings under `agent.run`, so the Langfuse tree is flatter than a per-iteration hierarchy. Functional and correct for 3.2 (every call is still traced); future polish opens nested spans inside the `plan` / `execute_tools` nodes for tighter readability. Not a blocker for shipping 3.2.
 
 ---
 
@@ -255,3 +297,6 @@ Open questions we know we must answer. Each graduates to a `D-NNN` once settled,
 - **2026-06-06 · D-021 (new, Phase 2.5):** Deterministic chunk IDs via uuid5(NAMESPACE_OID, "{page_id}:{chunk_index}:{game_version}"). Root cause: prior uuid4() generated random IDs at insert, silently invalidating the golden set on volume wipe. One-time `refresh_golden_set.py` migration run; golden set now stable permanently. STEP 6 verification: down -v + rebuild produces hit@5=0.667 with unmodified eval_rag.jsonl.
 - **2026-06-06 · D-022 (new, Phase 2.5):** Threshold direction convention locked: _min = floor (>=), _max = ceiling (<=), unknown suffix raises ValueError. Fixes latent harness bug where 164ms measured against 300ms ceiling was reported as a failure. Shared helper in app/core/threshold_directions.py used by both harness and refuse-to-boot check.
 - **2026-06-11 · D-023 (new, Phase 3.1):** Router and FAQ model locked to claude-haiku-4-5. Live smoke test measured: router classify ~$0.00001/call, FAQ synthesis ~$0.0007/call, agent stub $0/call (no LLM). Two-request total ~$0.001. Sonnet-4-6 upgrade path reserved for Phase 3.2 agent boundary.
+- **2026-06-12 · D-024 (new, Phase 3.2, graduates P-008):** Agent bounded-loop iteration cap locked at MAX_ITERATIONS=5; tool roster finalized at 3 (query_wiki, analyze_loadout, suggest_next_boss). Caveat documented explicitly: the cap bounds plan→execute cycles, NOT tool dispatches — execute_tools dispatches every tool_use block in one assistant message per +1 iteration, so Q05 did 6 query_wiki calls within ≤5 iterations. Keep 5 (1–3 iterations sufficient across all 10 eval questions).
+- **2026-06-12 · D-025 (new, Phase 3.2):** Agent cost/latency profile measured over 10 hard questions (scripts/measure_agent_cost.py). Total $0.07–0.09; median ~$0.005/call, p95 ~$0.020 (Q05); median latency ~7 s, p95 ~13 s. Cost computed from Anthropic console totals (66,832 in / 4,105 out) at Haiku pricing — per-trace tokens unavailable in Langfuse UI (P-009). Input-token cost grows linear-to-quadratic with iteration count (accumulated tool results inflate context).
+- **2026-06-12 · P-009/P-010/P-011/P-012/P-013 (new, Phase 3.2):** P-009 Langfuse 2.60.10 UI token-display bug (SDK sends correct data; UI shows 0/0). P-010 cache compiled agent graph on app.state (currently per-request, ~50 ms). P-011 game-client backend URL localhost vs hosted (registered from the prior informal RUNBOOK §9 reference for ID hygiene). P-012 chunks_seen length cap to bound agent context cost. P-013 open nested per-iteration spans inside agent graph nodes for a tighter Langfuse trace hierarchy.

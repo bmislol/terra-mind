@@ -64,9 +64,16 @@ def _validate_anthropic_key(key: str) -> None:
         )
 
 
+_PROMPT_FILES: tuple[tuple[str, str], ...] = (
+    ("router", "router.md"),
+    ("faq_answer", "faq_answer.md"),
+    ("agent_system", "agent_system.md"),
+)
+
+
 def _load_prompts(prompts_dir: Path) -> LoadedPrompts:
     loaded: dict[str, str] = {}
-    for attr, filename in (("router", "router.md"), ("faq_answer", "faq_answer.md")):
+    for attr, filename in _PROMPT_FILES:
         path = prompts_dir / filename
         if not path.exists():
             raise RuntimeError(f"REFUSING TO BOOT: prompt file missing — {path}")
@@ -77,7 +84,11 @@ def _load_prompts(prompts_dir: Path) -> LoadedPrompts:
                 f"(got {len(content.strip())} chars, need ≥ 100)"
             )
         loaded[attr] = content
-    return LoadedPrompts(router=loaded["router"], faq_answer=loaded["faq_answer"])
+    return LoadedPrompts(
+        router=loaded["router"],
+        faq_answer=loaded["faq_answer"],
+        agent_system=loaded["agent_system"],
+    )
 
 
 def check_eval_thresholds(path: str) -> None:

@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from app.domain.bot import BotAnswer, ChunkRef, RoutingDecision, StatePayload
 from app.infra.tracing import current_trace_var
-from app.services import agent_stub as agent_stub_svc
+from app.services import agent as agent_svc
 from app.services import faq as faq_svc
 from app.services import router as router_svc
 
@@ -53,9 +53,12 @@ async def ask(request: Request, body: AskRequest) -> AskResponse:
             parent_span=bot_span,
         )
     else:
-        bot_answer = await agent_stub_svc.answer(
+        bot_answer = await agent_svc.answer(
             body.message,
             state,
+            anthropic=request.app.state.anthropic,
+            retrieval=request.app.state.retrieval_pipeline,
+            prompts=request.app.state.prompts,
             parent_span=bot_span,
         )
 

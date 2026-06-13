@@ -7,3 +7,4 @@ from dataclasses import dataclass
 class LoadedPrompts:
     router: str
     faq_answer: str
+    agent_system: str

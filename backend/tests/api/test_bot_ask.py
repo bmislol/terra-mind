@@ -29,6 +29,7 @@ def _make_app() -> FastAPI:
     test_app.state.prompts = LoadedPrompts(
         router="You are a router.",
         faq_answer="You are a FAQ assistant.",
+        agent_system="You are an agent.",
     )
     return test_app
 
@@ -89,7 +90,7 @@ async def test_ask_agent_question_returns_200_with_routing_agent() -> None:
             AsyncMock(return_value=RoutingDecision.agent),
         ),
         patch(
-            "app.api.bot.agent_stub_svc.answer",
+            "app.api.bot.agent_svc.answer",
             AsyncMock(return_value=_AGENT_ANSWER),
         ),
     ):

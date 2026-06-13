@@ -219,7 +219,7 @@ curl -s -X POST http://localhost:8000/bot/ask \
   | python3 -m json.tool
 ```
 
-**Agent path** — should return the stub answer with `"routing": "agent"` and an empty `source_chunks`:
+**Agent path (stateless)** — should return a real progression-aware answer with `"routing": "agent"`. With no state payload, `analyze_loadout` returns `needs_llm_fallback=true` (no fabricated class) and `suggest_next_boss` treats the world as pre-boss:
 ```bash
 curl -s -X POST http://localhost:8000/bot/ask \
   -H "Content-Type: application/json" \
@@ -227,7 +227,7 @@ curl -s -X POST http://localhost:8000/bot/ask \
   | python3 -m json.tool
 ```
 
-Both traces appear in the Langfuse UI at http://localhost:3001 within a few seconds. The FAQ trace shows `bot.ask → router.classify → router.llm` and `faq.answer → rag.retrieve + faq.llm`; the agent trace shows `bot.ask → router.classify → router.llm + agent.stub`.
+Both traces appear in the Langfuse UI at http://localhost:3001 within a few seconds. The FAQ trace shows `bot.ask → router.classify → router.llm` and `faq.answer → rag.retrieve + faq.llm`; the agent trace shows `bot.ask → router.classify → router.llm + agent.run` (with each `chat_with_tools` generation and `rag.retrieve` span as flat siblings under `agent.run` — see P-013). **Note (P-009):** Langfuse 2.60.10 renders token counts as 0/0 in the UI; the SDK sends correct counts. Use the Anthropic console for token/cost totals (D-025).
 
 **Troubleshooting — REFUSING TO BOOT on Anthropic key:**
 If `api` refuses to boot with `"REFUSING TO BOOT: Anthropic API key is missing or placeholder"`, the Vault-seeded value is a placeholder or empty:
@@ -241,6 +241,50 @@ sleep 5
 docker compose up -d api
 docker compose logs api --tail=15   # expect startup to reach "Langfuse auth OK"
 ```
+
+### 7.3 Agent path smoke test (with state)
+
+The canonical agent-path check sends a hard, state-dependent question with a full state payload — a Ranger in early pre-Hardmode (Fossil armor + a gun, Eye of Cthulhu and Eater of Worlds downed, Skeletron not yet beaten). This exercises the real LangGraph agent (D-024): `analyze_loadout` should classify **ranger / early-pre-hardmode**, `query_wiki` should retrieve Skeletron chunks, and `suggest_next_boss` should point at Skeletron.
+
+```bash
+curl -s -X POST http://localhost:8000/bot/ask \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Why do I keep dying to Skeletron?",
+    "state": {
+      "game_version": "1.4.4.9",
+      "gear": {
+        "armor": [
+          {"item_id": 0, "name": "fossil helmet"},
+          {"item_id": 0, "name": "fossil plate"},
+          {"item_id": 0, "name": "fossil greaves"}
+        ],
+        "accessories": [],
+        "weapon": {"item_id": 0, "name": "the undertaker"}
+      },
+      "world": {
+        "hardmode": false,
+        "downed_bosses": ["Eye of Cthulhu", "Eater of Worlds"],
+        "biome": "forest"
+      }
+    }
+  }' | python3 -m json.tool
+```
+
+Expect `"routing": "agent"`, a class-aware progression-aware answer, and a non-empty `source_chunks` list (the Skeletron wiki chunks the agent retrieved). The Langfuse trace shows `bot.ask → router.classify → router.llm + agent.run`, with the per-call generation events and `rag.retrieve` spans flat under `agent.run` (P-013).
+
+### 7.4 Reproducing Phase 3.2 measurements (D-025)
+
+`scripts/measure_agent_cost.py` POSTs a fixed set of 10 hard questions (each with a realistic state payload) to `/bot/ask`, captures status / latency / routing / chunk counts per question, and writes a timestamped JSON file under `backend/measurements/`. Token and cost columns print `PENDING` because Langfuse 2.60.10 does not surface per-trace token counts (P-009).
+
+```bash
+# With the full stack up and a real Anthropic key seeded in Vault:
+cd backend
+uv run python scripts/measure_agent_cost.py            # → measurements/agent_cost_<UTC>.json
+uv run python scripts/measure_agent_cost.py --url http://localhost:8000
+```
+
+**Cost methodology (run-and-read-console):** record the Anthropic credit balance / token totals on the [Anthropic console](https://platform.claude.com/usage) immediately **before** and **after** the run, then divide the token delta by the call count and apply Haiku pricing ($0.80/M input + $4.00/M output, D-023). The Phase 3.2 baseline (12 Jun 2026): 66,832 input / 4,105 output tokens for 10 calls → ~$0.07, median ~$0.005/call, p95 ~$0.020/call (Q05). See D-025 for the full table.
 
 ## 8. Common Issues
 
@@ -266,7 +310,7 @@ The throwaway spike (code in `spike/`) verified the backend↔client bridge. Fin
 - Use a single static `HttpClient` for the mod's lifetime — do not create one per call.
 
 ### Networking
-- `http://localhost:8000` is reachable from inside tModLoader (confirmed). **Open question for Phase 4 (P-009):** does the real client point at `localhost` (player runs the stack locally) or a hosted backend URL? Decide in the client phase.
+- `http://localhost:8000` is reachable from inside tModLoader (confirmed). **Open question for Phase 4 (P-011):** does the real client point at `localhost` (player runs the stack locally) or a hosted backend URL? Decide in the client phase.
 
 ### Result
 - **Verified 2026-06-03:** in-game `/bot` round-tripped to the local echo server; reply rendered in chat with live HP. Phase 1.2 success criterion met; the project's riskiest unknown (the C#↔Python bridge) is resolved.

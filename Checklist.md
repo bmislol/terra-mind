@@ -268,55 +268,72 @@ Iteration cap graduates P-008.
 synthesis). Watch the cost per turn carefully.
 
 #### Closeout
-- [ ] LangGraph setup: `app/agent/graph.py`. Bounded loop with
-      `StateGraph`. Nodes: `plan_step`, `execute_tool`,
-      `synthesize_answer`. Edges enforce loop cap (P-008 — pick a
-      number; my guess is 5-8 iterations).
-- [ ] Agent prompt: `app/prompts/agent_system.md`. Instructs the LLM
-      to call tools to gather information before answering, to cite
-      retrieved chunks in its final answer, to refuse if it can't
-      ground a claim.
-- [ ] Tool: `query_wiki(query: str, game_version: str, k: int = 5)` —
-      wraps `RetrievalPipeline.retrieve()`. Returns chunks as a JSON
-      list the LLM can read.
-- [ ] Tool: `analyze_loadout(state: StatePayload)` — reads equipped
-      gear, returns the canonical class (Melee/Ranger/Mage/Summoner)
-      using deterministic rules. Pure Python, no LLM call. Cold-start
-      fallback (no gear equipped) defers to Phase 3.3's LLM zero-shot.
-- [ ] Tool: `suggest_next_boss(state: StatePayload)` — reads
-      `downed_bosses` and `hardmode` flags from state, returns the
-      next progression target as a string. Pure Python decision tree.
-- [ ] Iteration cap enforcement: agent gracefully degrades if it hits
-      the cap without converging. Returns a "best-effort" answer from
-      whatever chunks it gathered, plus a warning. Graduates P-008
-      to D-NNN with the chosen number.
-- [ ] Langfuse spans: every tool call is its own span under the agent
-      span. The full trace tree for a hard question now shows
-      `router.classify → agent.plan → agent.tool_call (query_wiki) →
-      rag.retrieve → agent.plan → agent.tool_call (analyze_loadout) →
-      agent.synthesize`. This is the "agent debugging is miserable
-      without traces" claim made real.
-- [ ] Unit tests: `tests/agent/test_graph.py` — mocked LLM responses
-      drive the graph through pre-baked tool-call sequences. Cover:
-      single-tool path, multi-tool path, loop-cap-reached path.
-      `tests/agent/test_tools.py` covers the three tools in isolation
-      with fixture state payloads.
-- [ ] Integration test (manual, not in CI): send the canonical hard
-      question `"why do I keep dying to Skeletron?"` with a state
-      payload showing the player has pre-Hardmode gear, no Skeletron
-      defeated, low HP. The agent should retrieve Skeletron strategy
-      chunks, analyze the loadout's class, and synthesize a
-      progression-aware answer. Watch the Langfuse trace.
-- [ ] Cost measurement: send 10 hard queries through the agent, record
-      median tokens per turn and median cost. Document in EVALS.md as
-      operational baseline (not a hard gate).
-- [ ] DECISIONS.md: D-NNN graduating P-008 (loop cap) with the chosen
-      iteration count and the cost-per-turn measurement. Possibly a
-      D-NNN documenting the three-tool choice with rationale (why
-      these three, why not more).
-- [ ] ARCH.md §5: update the agent step with the real tool list and
-      loop bounds.
-- [ ] Checklist 3.2 ticked + CLAUDE.md §2.
+- [x] LangGraph setup: `app/agent/graph.py`. Bounded loop with
+      `StateGraph`. Nodes shipped as `plan`, `execute_tools`,
+      `synthesize_cap` (renamed from the planned
+      `plan_step`/`execute_tool`/`synthesize_answer`). Edges enforce
+      the loop cap. **MAX_ITERATIONS = 5** (D-024, graduates P-008).
+- [x] Agent prompt: `app/prompts/agent_system.md` (commit 2). Instructs
+      the LLM to call tools before answering, cite retrieved facts by
+      name, and refuse honestly when it can't ground a claim.
+- [x] Tool: `query_wiki(query, *, game_version, k=5, retrieval, ...)` —
+      wraps `RetrievalPipeline.retrieve()`. Returns a list of dicts
+      (`page_title`/`section`/`content`/`source_url`/`score`) the LLM
+      can read; the graph stores `ChunkRef`s (no content) in
+      `chunks_seen` for `BotAnswer.source_chunks`.
+- [x] Tool: `analyze_loadout(state)` — reads equipped gear, returns
+      `class` + `confidence` + `progression_stage` + `needs_llm_fallback`
+      via a hardcoded item→class dict (Phase 3.2). Pure Python, no LLM
+      call. Cold-start (empty/unknown gear) → `needs_llm_fallback=True`,
+      deferred to Phase 3.3's LLM zero-shot (D-009). Phase 3.3 makes
+      this Cargo-aware.
+- [x] Tool: `suggest_next_boss(state)` — reads `downed_bosses` and
+      `hardmode`, returns `next_boss` + `rationale`. Pure Python
+      decision tree (pre-HM EoC→EoW/BoC→Skeletron→WoF; post-HM
+      mech→Plantera→Golem→Cultist→Moon Lord).
+- [x] Iteration cap enforcement: at MAX_ITERATIONS the graph routes to
+      `synthesize_cap`, which forces a final answer from gathered
+      results. The service layer (`app/services/agent.py`) also wraps
+      `graph.ainvoke` in try/except → safe fallback `BotAnswer`, so the
+      endpoint never 500s. Graduates P-008 → **D-024** (cap = 5; caveat:
+      cap bounds plan→execute cycles, not tool dispatches).
+- [x] Langfuse spans: agent calls are traced under an `agent.run` span.
+      **Deviation:** the trace tree is *flatter* than the planned
+      `agent.plan → agent.tool_call → …` hierarchy — each
+      `chat_with_tools` generation event and each `rag.retrieve` span
+      are flat siblings under `agent.run` (no per-iteration spans).
+      Functional and visible; tighter nesting deferred to **P-013**.
+      Token counts render as 0/0 in the Langfuse 2.60.10 UI (**P-009**,
+      SDK sends correct data).
+- [x] Unit tests: `tests/agent/test_graph.py` (4 tests: immediate
+      end_turn, single-tool→end_turn, multi-tool, cap-hit — all with
+      pre-baked mocked LLM responses). `tests/agent/test_tools.py`
+      (3 query_wiki, 8 analyze_loadout, 9 suggest_next_boss fixtures).
+- [x] Integration test (manual, operator smoke test): canonical
+      `"why do I keep dying to Skeletron?"` with a Ranger early-pre-HM
+      state payload → classified ranger / early-pre-hardmode, retrieved
+      5 Skeletron chunks, multi-iteration loop produced a class-aware
+      progression-aware answer. Canonical curl now in RUNBOOK §7.3.
+- [x] Cost measurement: `scripts/measure_agent_cost.py` + 10-question
+      run (12 Jun 2026). Median ~$0.005/call, p95 ~$0.020 (Q05),
+      median latency ~7 s. Documented in **D-025** (operational
+      baseline, not a hard gate); reproduction steps in RUNBOOK §7.4.
+- [x] DECISIONS.md: **D-024** graduates P-008 (loop cap = 5 + three-tool
+      roster finalization). **D-025** documents the cost/latency
+      profile. Cost methodology + Langfuse caveat noted (P-009).
+- [x] ARCH.md §5 step 6: updated with MAX_ITERATIONS=5, the three tools
+      by name, and references to D-024 / D-009.
+- [x] Checklist 3.2 ticked + CLAUDE.md §2.
+
+**Phase 3.2 follow-up / open polish items (none blocking):**
+- [ ] **P-009** — Langfuse 2.60.10 UI shows token usage as 0/0; upgrade
+      Langfuse in an observability-polish phase.
+- [ ] **P-010** — cache the compiled agent graph on `app.state` at
+      lifespan instead of building it per request (~50 ms/call).
+- [ ] **P-012** — cap total `chunks_seen` length to bound agent context
+      cost (input tokens grow linear-to-quadratic with iterations).
+- [ ] **P-013** — open nested per-iteration spans inside the agent graph
+      nodes for a tighter Langfuse trace hierarchy.
 
 ---
 
