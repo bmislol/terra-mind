@@ -100,6 +100,18 @@ async def refresh_access_token(
     )
 
 
+async def record_login(
+    tenant_id: UUID,
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Write an ``auth.login`` audit row (SECURITY §6). Called on successful
+    login; refresh is intentionally NOT audited (every-30-min noise)."""
+    async with session_factory() as session:
+        await write_audit(session, actor=tenant_id, action="auth.login")
+        await session.commit()
+
+
 async def create_guest_session(
     *,
     session_factory: async_sessionmaker[AsyncSession],
@@ -108,11 +120,12 @@ async def create_guest_session(
     """Create an ephemeral guest tenant and return an **access-only** token.
 
     Guests get no refresh token (ephemeral); when the 30-min access token
-    expires they re-guest. Erasure is a no-op for guests (SECURITY §4).
+    expires they re-guest. Their data IS erasable on DELETE /me (erasure §4).
     """
     async with session_factory() as session:
         guest = await create_guest(session, ttl_seconds=GUEST_TTL_SECONDS)
         guest_id = guest.id  # set in Python; available before commit
+        await write_audit(session, actor=guest_id, action="auth.login", target="guest")
         await session.commit()
     return create_access_token(
         tenant_id=guest_id, role="player", signing_key=signing_key

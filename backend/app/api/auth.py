@@ -68,6 +68,9 @@ async def login(
         )
     key = request.app.state.secrets.jwt_signing_key
     role = role_for(user)
+    await auth_svc.record_login(
+        user.id, session_factory=request.app.state.session_factory
+    )
     return TokenPairResponse(
         access_token=create_access_token(tenant_id=user.id, role=role, signing_key=key),
         refresh_token=create_refresh_token(

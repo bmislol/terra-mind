@@ -246,3 +246,33 @@ async def test_guest_tenant_inserts_with_null_credentials(
         ).one()
     assert row.email is None
     assert row.hashed_password is None
+
+
+# ── auth.login audit (Phase 4.1b) ─────────────────────────────────────────────
+
+
+async def test_login_writes_auth_login_audit_row(
+    auth_client: AsyncClient,
+    app_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    await auth_client.post("/auth/register", json=_register_body())
+    await auth_client.post("/auth/jwt/login", data=_login_form())
+    async with app_session_factory() as session:
+        actions = (
+            (await session.execute(text("SELECT action FROM audit_log")))
+            .scalars()
+            .all()
+        )
+    assert "auth.login" in actions
+
+
+async def test_guest_writes_auth_login_audit_row(
+    auth_client: AsyncClient,
+    app_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    await auth_client.post("/auth/guest")
+    async with app_session_factory() as session:
+        rows = (
+            await session.execute(text("SELECT action, target FROM audit_log"))
+        ).all()
+    assert any(r.action == "auth.login" and r.target == "guest" for r in rows)

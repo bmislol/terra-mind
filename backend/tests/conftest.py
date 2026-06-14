@@ -83,6 +83,13 @@ def _pg() -> Iterator[PgInfo]:
 
 
 @pytest.fixture
+def owner_sync_dsn(_pg: PgInfo) -> str:
+    """Owner (superuser) sync DSN — bypasses RLS. For tests that must verify
+    physical state (e.g. erasure proving deletion, not RLS masking)."""
+    return _pg.owner_sync_dsn
+
+
+@pytest.fixture
 async def app_session_factory(
     _pg: PgInfo,
 ) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
@@ -91,7 +98,9 @@ async def app_session_factory(
     Truncates as the owner first (bypasses RLS; can TRUNCATE) for a clean slate.
     """
     with psycopg.connect(_pg.owner_sync_dsn, autocommit=True) as conn:
-        conn.execute("TRUNCATE tenants, sessions, messages RESTART IDENTITY CASCADE")
+        conn.execute(
+            "TRUNCATE tenants, sessions, messages, audit_log RESTART IDENTITY CASCADE"
+        )
     engine = create_async_engine(_pg.app_async_dsn)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     try:

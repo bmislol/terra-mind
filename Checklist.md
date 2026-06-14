@@ -450,23 +450,37 @@ pyjwt) — fastapi-users supplies the user model + argon2id hashing + register;
 **Goal:** prove **"tenant isolation is the security story" (CLAUDE §4.3) in Python, before the mod exists.** Two-tenant isolation demonstrated end-to-end through the real API + RLS; erasure scoped to one tenant; audit rows for auth/erasure events. This is the phase that locks the headline control in CI; Phase 7.1 later *re-demos* it live.
 
 #### Closeout
-- [ ] `tests/test_rls_isolation.py`: create two tenants (A, B), write `/bot`
-      session/message rows under each, and assert through the **real API + RLS**
-      that A cannot read or write B's rows (cross-tenant read returns nothing;
-      cross-tenant write is rejected). No application `WHERE` — Postgres enforces.
-- [ ] `DELETE /me` (right-to-erasure) scoped to the caller's tenant only: purges
-      that tenant's Postgres rows + Redis session, leaves the other tenant intact;
-      writes a `tenant.erased` audit row. (Full erasure UX is Phase 6.2; here it
-      is the isolation-scoped proof.)
-- [ ] Audit rows for auth events (`auth.login`, `session.revoked`, `tenant.erased`)
-      written and readable only by an operator (`GET /admin/audit-log`).
-- [ ] Denylist check wired into the authed request path (a revoked token cannot
-      reach any tenant-scoped handler).
-- [ ] EVALS.md: register the isolation test as a **CI gate** (cross-tenant read
-      must return nothing for a green build). SECURITY.md §3 updated to "proven
-      in 4.1b, re-demoed in 7.1".
-- [ ] Local gate green; **Checklist 4.1b ticked + CLAUDE §2.** Security story
-      locked in CI before any C#.
+_Shipped: memory wired into `/bot/ask` (the per-tenant data isolation operates
+on) via the two-short-transactions RLS pattern; the proof drives the real path,
+not direct inserts. Path: `tests/services/test_rls_isolation.py` (not the
+earlier `tests/test_rls_isolation.py` reference — reconciled here + SECURITY §3)._
+- [x] Short-term memory wired (D-031, P-004): `app/memory/short_term.py` (N=20 /
+      TTL=2 h, injected Redis, redaction-on-write) + `app/services/memory.py`
+      dual-write (Postgres `messages`/`sessions` under RLS + Redis) into
+      `/bot/ask` via **two short transactions** (resolve_session → agent, no DB
+      held → record_turn), each re-setting `set_tenant_context` (D-030). Read
+      path (`get_history`) built, not yet consumed (documented).
+- [x] `tests/services/test_rls_isolation.py`: two real tenants through the **real
+      `/bot/ask` path** as non-superuser `terramind_app`; under B's context a raw
+      SELECT of `messages` returns **zero** of A's rows (by tenant, count,
+      content). No application `WHERE` — Postgres enforces. Falsifiable (fails if
+      RLS off).
+- [x] `DELETE /me` data erasure (D-032): purges the tenant's messages/sessions
+      (RLS-scoped DELETE) + Redis keys + `tenant.erased` audit (with
+      `deleted_rows`). Proven physical (not masked) via the **owner connection**
+      in `tests/api/test_erasure.py`; B's rows survive. Guests purged too. Keeps
+      the account row (full account deletion → P-015).
+- [x] Audit rows: `auth.login` (login + guest, not refresh), `session.revoked`
+      (logout), `tenant.erased` (erasure) — written; operator read endpoint is
+      Phase 5.2.
+- [x] Denylist check wired into the authed request path (`require_access_token`,
+      4.1a) — a revoked token cannot reach `/bot/ask` or `DELETE /me`.
+- [x] EVALS.md §4b: isolation + erasure registered as **blocking security
+      tests**. SECURITY.md §3 = isolation PROVEN end-to-end (+ erasure scope/PII).
+      DECISIONS D-031/D-032, P-015; ARCH §5/§7/§8 implemented.
+- [x] Local gate green (Docker up); **248/248**. **Checklist 4.1b ticked +
+      CLAUDE §2.** Security story locked in CI before any C#. _(Standing flag:
+      the Docker-dependent CI run must go green before the 4.1b PR merges.)_
 
 ### Phase 4.2 · Mod core: `/bot` command + state read — `feat/17-client-core`
 
@@ -569,7 +583,7 @@ pyjwt) — fastapi-users supplies the user model + argon2id hashing + register;
 
 ### Phase 7.1 · Isolation **re-demo** (live) — `feat/25-isolation-demo`
 - Goal: live re-demonstration of the isolation **already proven in CI at Phase 4.1b** — a second tenant shown end-to-end so the defense sees it, not first proof.
-- Done-when: Tenant A query can't surface Tenant B data, shown live end-to-end (the `tests/test_rls_isolation.py` gate from 4.1b is the proof; this is the visual demo of it).
+- Done-when: Tenant A query can't surface Tenant B data, shown live end-to-end (the `tests/services/test_rls_isolation.py` gate from 4.1b is the proof; this is the visual demo of it).
 
 ### Phase 7.2 · Deliverables finalize + README — `feat/26-runbook-deliverables`
 - Goal: `RUNBOOK.md §demo` numbered click-through; finalize `EVALS/SECURITY/LICENSES`; real `README.md`.
