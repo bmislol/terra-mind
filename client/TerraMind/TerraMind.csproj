@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!-- tModLoader supplies target framework (net8.0), references, and output
+	     wiring. This file builds only inside <tModLoader>/ModSources/TerraMind/
+	     where tModLoader.targets lives — see RUNBOOK §10. -->
+	<Import Project="..\tModLoader.targets" />
+
+	<PropertyGroup>
+		<!-- Enable nullable reference types so `string?` annotations on the DTOs
+		     (ItemRefDto.Prefix, GearDto.Weapon) compile without CS8632. -->
+		<Nullable>enable</Nullable>
+	</PropertyGroup>
+
+	<ItemGroup>
+	</ItemGroup>
+
+</Project>
