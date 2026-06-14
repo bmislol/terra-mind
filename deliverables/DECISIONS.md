@@ -70,6 +70,8 @@ Architectural decision log for **terra-mind**. Every significant choice lives he
 **Why:** Equipped gear is *truthful*, not predicted — a full ranger set holding a Megashark *is* a ranger. The trained model would need a synthetic, wiki-grounded dataset (no labelled "answers→class" rows exist), making its F1 circular; not worth the days.
 **Number / evidence:** 4 classes (Melee/Ranger/Mage/Summoner); 0 training rows required.
 
+**Revised 2026-06-13 (Phase 3.3):** Fully implemented — see **D-026** (hybrid Cargo `damagetype` + curated armor map + LLM zero-shot fallback). Trained classifier confirmed not needed.
+
 ### D-010 — Memory
 **Status:** Locked (2026-06-03)
 **Choice:** **Short-term Redis with explicit TTL only.** No long-term / cross-conversation memory.
@@ -249,6 +251,33 @@ Per-question chunk accumulation / `query_wiki` dispatches / latency: **Q05** 30/
 **Cost methodology:** exact per-trace token counts are **unavailable in the Langfuse UI (P-009)**; cost is computed from the Anthropic console total token delta over the run at Haiku pricing ($0.80/M input + $4.00/M output, D-023). The credit-balance delta for the day was $13.77 → $13.68 = $0.09, of which ~$0.07 is the run itself (token-derived) and the remainder is same-day smoke-test overhead. `AnthropicClient` receives correct counts from the SDK — only the Langfuse display is affected.
 **Token-cost growth:** input cost grows roughly **linear-to-quadratic with iteration count** — each subsequent planning call re-sends the accumulated tool results (chunk text) as context, so input tokens compound across iterations. This is why a cap on `chunks_seen` length (P-012) is the natural cost lever, not just the iteration count.
 
+### D-026 — Hybrid class detection (graduates D-009 to implemented)
+**Status:** Locked (2026-06-13, Phase 3.3)
+**Choice:** Player class is detected by a three-tier hybrid, resolved per equipped item by `ItemClassifier` (`app/agent/class_detection.py`) with a deterministic vote across all gear in `analyze_loadout`:
+1. **Cargo weapons** — class from the Cargo Items `damagetype` field (`Melee`/`Ranged`/`Magic`/`Summon`, case-normalised), **gated on `type` containing `"weapon"`** so tools/ammunition that also carry a `damagetype` (pickaxes, bullets) are excluded (finding A2). Indexed by `item_id` and by `name`.
+2. **Curated armor/fallback map** — `CURATED_ITEM_CLASS` (the demoted Phase 3.2 dict), because the Cargo Items table carries **zero class signal for armor** (finding A3: every armor row has empty `damagetype`/`tag`, `type=armor`, generic `listcat="craftable items"`). Also the fallback for weapons not in Cargo.
+3. **LLM zero-shot fallback** — when both deterministic tiers find no signal (empty/unknown/mixed gear → `needs_llm_fallback=True`), `execute_tools` fires one `claude-haiku-4-5` call (`max_tokens=8`, system prompt `class_fallback.md`) over a name-based gear+inventory summary. Fires in `execute_tools`, **never inside `analyze_loadout`** (which stays a pure, LLM-free function so its fixtures keep returning `class=None`).
+
+**Resolution order per item:** `item_id → Cargo weapon` → `name → Cargo weapon` → `item_id → Cargo name → curated` (armor bridge for mod item_ids) → `name → curated` → `None`. `item_id` is primary because it is mod-native (`item.type` == Cargo `itemid`) and localization-stable; `name` is the fallback for hand-entered / test payloads.
+
+**Number / evidence (measured 2026-06-13, `game_version=1.4.4.9`, `items.json` = 6,233 rows):**
+
+| Signal source | Coverage |
+|---|---|
+| Cargo weapons via `damagetype`, **gated on type=weapon (A2)** | **446** rows = 198 melee + 113 ranger + 76 magic + 59 summoner → **445 distinct item_ids** |
+| Rows carrying a class `damagetype` *before* gating | 632 — A2 excludes **186 tools/ammunition** (pickaxes are `damagetype=Melee`, bullets `damagetype=Ranged`); counting them would misclassify a pickaxe as melee |
+| vs Phase 3.2 hardcoded dict (~20 weapons) | **~22× weapon coverage** |
+| Armor class signal in Cargo | **0** — 100% of armor resolves via the curated map (A3) |
+| LLM zero-shot fallback cost | ~$0.0002/call (~80 in / 8 out, Haiku), cold-start only |
+
+**Multi-tag note:** the `^`-joined multi-tag is on the Cargo **`type`** field (`"weapon^crafting material"`, e.g. Minishark) — **not** on `damagetype`, which is always clean. `_is_weapon_type` splits `type` on `^` and checks for a `weapon` segment; the **446 count is unchanged** vs the prior substring check (verified — 0 disagreements on real data). Unlike `listcat` (rejected in A1 for being unusably multi-tag), `damagetype` has no `^`, so no `damagetype` parser is needed.
+
+**Cost addendum (NOT in D-025's Phase 3.2 profile):** the fallback adds one extra `claude-haiku-4-5` call (~$0.0002, ~1–2 s latency) to **any agent turn where deterministic detection finds no class signal** (empty / unknown / mixed gear). It does **not** fire when the player has a clear class lean. This is new spend beyond the D-025 agent profile; cold-start path only.
+
+**CI / data constraint (finding A4):** `data/raw/` is gitignored, so the Cargo `items.json` is **not present in CI**. The module-level `DEFAULT_CLASSIFIER` is curated-only (no Cargo) and is what unit tests resolve against; production layers Cargo on at lifespan via `ItemClassifier.from_cargo_file` (refuse-to-boot if missing, unparseable, or `< 100` rows). Cargo-path tests use a small **synthetic** `items.json` fixture. **Tests must not boot the real lifespan in CI** — the `min_items=100` check would refuse-to-boot without the gitignored file.
+
+**Graduates D-009:** the live gear-read + LLM zero-shot cold-start of D-009 is now fully implemented. The trained-classifier path is **confirmed future-work-not-needed** — truthful gear read + Cargo `damagetype` + LLM zero-shot covers the four classes with no labelled dataset. The 8 `analyze_loadout` + 9 `suggest_next_boss` fixtures pass unchanged across the swap (the curated map is byte-identical to the Phase 3.2 dict).
+
 ---
 
 ## Pending Decisions
@@ -300,3 +329,4 @@ _P-008 graduated to D-024 (Phase 3.2): tool roster finalized at 3, MAX_ITERATION
 - **2026-06-12 · D-024 (new, Phase 3.2, graduates P-008):** Agent bounded-loop iteration cap locked at MAX_ITERATIONS=5; tool roster finalized at 3 (query_wiki, analyze_loadout, suggest_next_boss). Caveat documented explicitly: the cap bounds plan→execute cycles, NOT tool dispatches — execute_tools dispatches every tool_use block in one assistant message per +1 iteration, so Q05 did 6 query_wiki calls within ≤5 iterations. Keep 5 (1–3 iterations sufficient across all 10 eval questions).
 - **2026-06-12 · D-025 (new, Phase 3.2):** Agent cost/latency profile measured over 10 hard questions (scripts/measure_agent_cost.py). Total $0.07–0.09; median ~$0.005/call, p95 ~$0.020 (Q05); median latency ~7 s, p95 ~13 s. Cost computed from Anthropic console totals (66,832 in / 4,105 out) at Haiku pricing — per-trace tokens unavailable in Langfuse UI (P-009). Input-token cost grows linear-to-quadratic with iteration count (accumulated tool results inflate context).
 - **2026-06-12 · P-009/P-010/P-011/P-012/P-013 (new, Phase 3.2):** P-009 Langfuse 2.60.10 UI token-display bug (SDK sends correct data; UI shows 0/0). P-010 cache compiled agent graph on app.state (currently per-request, ~50 ms). P-011 game-client backend URL localhost vs hosted (registered from the prior informal RUNBOOK §9 reference for ID hygiene). P-012 chunks_seen length cap to bound agent context cost. P-013 open nested per-iteration spans inside agent graph nodes for a tighter Langfuse trace hierarchy.
+- **2026-06-13 · D-026 (new, Phase 3.3, graduates D-009):** Hybrid class detection — Cargo `damagetype` gated on type=weapon (A2): **446 weapon rows = 198 melee + 113 ranger + 76 magic + 59 summoner → 445 distinct item_ids, ~22× the Phase 3.2 ~20-item dict** (632 rows carry a class damagetype pre-gating; 186 tools/ammo excluded by A2) + curated armor/fallback map (Cargo has 0 armor signal, A3) + LLM zero-shot fallback (~$0.0002/call, cold-start only — new spend beyond D-025's profile). item_id-primary resolution, name fallback. CI uses the curated-only DEFAULT_CLASSIFIER + synthetic Cargo fixtures (`data/raw/` gitignored, A4); production layers Cargo at lifespan (refuse-to-boot if missing / `<100` rows). D-009 fully implemented; trained classifier confirmed not needed. 8 analyze_loadout + 9 suggest_next_boss fixtures unchanged.

@@ -10,17 +10,31 @@ Operational guide for terra-mind.
 git clone <repo-url>
 cd terra-mind
 cp .env.example .env
-docker compose up --build
+
+# 1) Produce the Cargo data the api needs to BOOT (host-side, network-only — no DB).
+#    A clean clone has no data/raw (gitignored). The api mounts backend/data/raw
+#    read-only and REFUSES TO BOOT without data/raw/<version>/cargo/items.json
+#    (class detection, D-026). These are §4 steps 1–2:
+cd backend
+uv run python -m scripts.scrape_wiki  --version 1.4.4.9
+uv run python -m scripts.scrape_cargo --version 1.4.4.9
+cd ..
+
+# 2) Boot the stack (api now finds items.json via the ./backend/data/raw:ro mount):
+docker compose up --build -d
+
+# 3) Populate pgvector for RAG answers (DB is up now — §4 step 3; see §4 for the DSN):
+#    cd backend && DATABASE_URL=... uv run python -m scripts.build_corpus --version 1.4.4.9
 ```
 
-`.env.example` contains only the Vault dev token and port assignments — no application secrets.
+`.env.example` contains only the Vault dev token and port assignments — no application secrets. Steps 1 and 3 are the same host-side corpus scripts documented in **§4**; step 1 is split out because `items.json` is a **boot-time** dependency of the api (not just a `build_corpus` input).
 
 Expected startup order:
 1. `vault` starts in dev mode.
 2. `vault-init` seeds Vault KV paths and exits.
 3. `db`, `redis`, `langfuse` start.
 4. `migrate` runs `alembic upgrade head` (incl. `CREATE EXTENSION vector` and RLS policies) and exits.
-5. `api`, `frontend-admin`, `frontend-user` start.
+5. `api` starts — loads the embedding model + the Cargo class-detection index (logs `item_classifier ready: 445 cargo weapons …`) — then `frontend-admin`, `frontend-user`.
 
 Access points:
 
@@ -123,6 +137,8 @@ uv run python -m scripts.build_corpus --version <game_version>
 ```
 
 All three scripts are idempotent: re-running is safe. `scrape_wiki.py` and `scrape_cargo.py` skip already-fetched data. `build_corpus.py` uses `INSERT … ON CONFLICT … DO UPDATE` (upsert-keyed on `page_id, chunk_index, game_version`).
+
+> **`scrape_cargo`'s `items.json` is also a *runtime* dependency of the api** (not just a `build_corpus` input). The api mounts `backend/data/raw` read-only and refuses to boot without `data/raw/<version>/cargo/items.json` for class detection (D-026). So step 2 must run **before** the api starts — see §1.
 
 **Chunk IDs are deterministic (Phase 2.5, D-021).** `build_corpus.py` derives every row's primary key as `uuid5(NAMESPACE_OID, f"{page_id}:{chunk_index}:{game_version}")`. The same corpus input always produces the same UUID, so `docker compose down -v` followed by a rebuild produces an identical `rag_chunks` table. The eval golden set (`data/eval/eval_rag.jsonl`) does not need to be refreshed after a volume wipe.
 
@@ -273,6 +289,19 @@ curl -s -X POST http://localhost:8000/bot/ask \
 
 Expect `"routing": "agent"`, a class-aware progression-aware answer, and a non-empty `source_chunks` list (the Skeletron wiki chunks the agent retrieved). The Langfuse trace shows `bot.ask → router.classify → router.llm + agent.run`, with the per-call generation events and `rag.retrieve` spans flat under `agent.run` (P-013).
 
+**Cold-start (LLM zero-shot fallback, D-026).** Send a question with no gear (or only starter/unknown items) so deterministic class detection finds no signal:
+
+```bash
+curl -s -X POST http://localhost:8000/bot/ask \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "What class should I build toward?",
+    "state": {"game_version": "1.4.4.9", "world": {"hardmode": false}}
+  }' | python3 -m json.tool
+```
+
+`analyze_loadout` returns `needs_llm_fallback=true` (no fabricated class), and `execute_tools` fires one extra `claude-haiku-4-5` call (`max_tokens=8`) — visible as an **`agent.llm_classify`** span in the trace. This path adds ~$0.0002 + ~1–2 s and fires **only** when there is no clear class lean (D-026 cost addendum).
+
 ### 7.4 Reproducing Phase 3.2 measurements (D-025)
 
 `scripts/measure_agent_cost.py` POSTs a fixed set of 10 hard questions (each with a realistic state payload) to `/bot/ask`, captures status / latency / routing / chunk counts per question, and writes a timestamped JSON file under `backend/measurements/`. Token and cost columns print `PENDING` because Langfuse 2.60.10 does not surface per-trace token counts (P-009).
@@ -293,6 +322,9 @@ uv run python scripts/measure_agent_cost.py --url http://localhost:8000
 - **pgvector extension** must be created in the first migration (`CREATE EXTENSION vector`).
 - **tModLoader can't find .NET 8 SDK** (Linux/Steam): see the Phase 1.2 spike notes; install the SDK system-wide via apt, or build via `start-tModLoader.sh -build`.
 - **Empty RAG answers** usually mean the wrong `game_version` filter or an unbuilt corpus — check `manifest.json` and the tenant's selected version.
+- **`api` refuses to boot — Cargo items file missing / truncated.** Class detection (D-026) loads `data/raw/<version>/cargo/items.json` at lifespan and refuses to boot if it is missing or has `< 100` rows. The file is **gitignored** (`data/raw/`), so it must be scraped locally **before** the api starts: `cd backend && uv run python -m scripts.scrape_cargo --version 1.4.4.9`. The path is configurable via `cargo_items_path` (default `data/raw/1.4.4.9/cargo/items.json`). **The file must also be visible *inside* the api container** — the compose api service mounts `./backend/data/raw:/app/data/raw:ro` (resolving to `/app/data/raw/<version>/cargo/items.json` under `WORKDIR /app`). If the file exists on the host but the api still refuses to boot, confirm that mount line is present. Startup logs `item_classifier ready: 445 cargo weapons (6233 cargo items)` on success; `0 cargo weapons` (or no such line) means a stale image or an unmounted/empty `data/raw`.
+- **CI never boots the real lifespan.** Because the Cargo file is gitignored, CI has no `items.json`; the `min_items=100` check would refuse to boot. Unit tests therefore never start the full lifespan — they call `ItemClassifier.from_cargo_file` directly with **synthetic** fixtures, and the curated-only `DEFAULT_CLASSIFIER` covers name-based class detection in CI. A future contributor adding a full-boot test must seed a Cargo fixture or it will fail in CI (not locally).
+- **Slow-connection image builds time out on torch wheels.** The embedding model (`sentence-transformers`) pulls large torch wheels (~2 GB). The Dockerfile sets `UV_HTTP_TIMEOUT=300` so `uv sync` won't abort mid-download on a slow link. Prefer a normal `docker compose build` / `up --build` — it reuses the uv cache mount (`--mount=type=cache,target=/root/.cache/uv`), so only changed layers rebuild. Avoid `--no-cache`, which forces a full ~2 GB re-download.
 
 ## 9. Spike Findings (Phase 1.2)
 

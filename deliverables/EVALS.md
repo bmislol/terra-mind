@@ -127,7 +127,12 @@ Job: `.github/workflows/eval-redteam.yml` — **PR-triggered**, no DB needed (it
 
 ## 3. Class-Detection Sanity Check (not a gate)
 
-Class detection is live gear-read + LLM zero-shot (D-009), not a trained model, so it has no F1 gate. As of Phase 3.2 the sanity check lives in `tests/agent/test_tools.py` (8 `analyze_loadout` fixtures): full melee/ranger/mage/summoner loadouts each resolve to the expected class with `high`/`medium` confidence; an empty new-character payload and an unknown-gear payload both return `class=None` with `needs_llm_fallback=True` (the LLM zero-shot cold-start path, wired in Phase 3.3). This is correctness, not a quality threshold. Note: in Phase 3.2 `analyze_loadout` uses a hardcoded item→class dict; Phase 3.3 makes it Cargo-aware (D-009) — the fixtures lock the behavioural contract across that change.
+Class detection is a hybrid of live gear-read + LLM zero-shot (D-009, implemented Phase 3.3 as D-026), not a trained model, so it has no F1 gate. The sanity check spans two files:
+
+- `tests/agent/test_tools.py` — the 8 `analyze_loadout` fixtures: full melee/ranger/mage/summoner loadouts resolve to the expected class with `high`/`medium` confidence; empty and unknown-gear payloads return `class=None` with `needs_llm_fallback=True`. These run against the curated-only `DEFAULT_CLASSIFIER` (CI-safe, no Cargo).
+- `tests/agent/test_class_detection.py` — the `ItemClassifier` tier logic against a synthetic Cargo fixture: weapon class via Cargo `damagetype`, tool-with-damagetype excluded (A2), armor via the curated map and the Cargo `item_id→name` bridge (A3), `item_id`-over-name precedence, the four refuse-to-boot cases, and the `llm_classify` zero-shot fallback (mocked Anthropic).
+
+This is correctness, not a quality threshold. The hybrid design (Cargo `damagetype` for 446 weapon rows gated on `type=weapon` + curated armor/fallback map + LLM zero-shot for no-signal gear) and its numbers are in DECISIONS.md D-026.
 
 ---
 

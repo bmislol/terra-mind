@@ -59,6 +59,7 @@ async def ask(request: Request, body: AskRequest) -> AskResponse:
             anthropic=request.app.state.anthropic,
             retrieval=request.app.state.retrieval_pipeline,
             prompts=request.app.state.prompts,
+            classifier=request.app.state.item_classifier,
             parent_span=bot_span,
         )
 

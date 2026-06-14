@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     # Path to eval_thresholds.yaml, relative to the backend/ working directory.
     eval_thresholds_path: str = "../eval_thresholds.yaml"
 
+    # Path to the Cargo Items table (class detection, D-009), relative to the
+    # backend/ working directory. Gitignored data — present in dev/prod, absent
+    # in CI (which never boots the lifespan).
+    cargo_items_path: str = "data/raw/1.4.4.9/cargo/items.json"
+
 
 def get_settings() -> Settings:
     return Settings()

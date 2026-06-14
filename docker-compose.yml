@@ -159,6 +159,9 @@ services:
       EVAL_THRESHOLDS_PATH: /app/eval_thresholds.yaml
     volumes:
       - ./eval_thresholds.yaml:/app/eval_thresholds.yaml:ro
+      # Cargo items.json for class detection (D-026). Gitignored data lives on a
+      # host volume (D-014); read-only — the api only reads it, scrape runs host-side.
+      - ./backend/data/raw:/app/data/raw:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
       interval: 10s

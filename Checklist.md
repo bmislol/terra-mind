@@ -155,7 +155,11 @@ Goal: a version-tagged wiki corpus in pgvector and a measured dense-retrieval ba
 
 ---
 
-## Section 3 — Router, Agent & Class Detection (Days 5–7)
+## Section 3 — Router, Agent & Class Detection (Days 5–7) ✅ COMPLETE
+
+_Phases 3.1 (router + `/bot/ask`), 3.2 (bounded LangGraph agent), and 3.3
+(finalized state schema + Cargo-aware class detection + LLM zero-shot fallback)
+all shipped. Next: Section 4, Phase 4.1 (auth + JWT + tenant isolation)._
 
 Goal: the FastAPI backend produces real answers. The retrieval pipeline
 from Phase 2.4 becomes useful via a router that picks between deterministic
@@ -348,55 +352,49 @@ in. Resolves D-009.
 `analyze_loadout` against more realistic state fixtures.
 
 #### Closeout
-- [ ] State payload schema finalization: `app/domain/state.py`.
-      `StatePayload` Pydantic model with fields:
-        - `game_version: str`
-        - `class StateGear`: `armor: list[ItemRef]`, `accessories:
-          list[ItemRef]`, `held_item: ItemRef | None`
-        - `inventory: list[ItemRef]` (top 20 or so by stack/value)
-        - `stats: PlayerStats` (HP, MP, defense)
-        - `world: WorldState` (`hardmode: bool`, `downed_bosses:
-          dict[str, bool]`, `biome: str`)
-      The schema must match what the tModLoader client will produce
-      in Phase 4.2 — talk to that phase's plan before locking the
-      schema.
-- [ ] `ItemRef`: `{item_id: int, name: str, prefix: str | None,
-      stack: int}`. `item_id` is the Terraria internal ID (matches
-      Cargo `Items.itemid`).
-- [ ] `analyze_loadout` rule set: deterministic class inference
-      from equipped gear. Examples:
-        - Full Spectre armor + magic weapon → Mage
-        - Hallowed Ranger Helmet + ranger accessories + Megashark →
-          Ranger
-        - No armor + Copper Shortsword (new character) → defer to
-          LLM zero-shot
-      The rules are encoded in Python, not in a prompt. The Cargo
-      `Items.listcat` ("Ranged weapons", "Magic weapons",
-      "Summoning") helps but isn't authoritative on its own.
-- [ ] Cold-start LLM zero-shot: when `analyze_loadout` returns
-      "unknown" (e.g., new character with no real gear), the agent
-      calls the LLM with the state payload + an onboarding prompt
-      ("based on this player's inventory and recent actions, what
-      class are they leaning toward?"). Returns one of the four
-      classes. This satisfies D-009's stated fallback path.
-- [ ] Test fixtures: `tests/agent/fixtures/states/` with realistic
-      JSON state payloads for each class at multiple progression
-      stages (pre-boss Ranger, post-Skeletron Mage, etc.).
-      `test_class_detection.py` covers each fixture and asserts the
-      expected class.
-- [ ] Tests for the LLM fallback path: mocked LLM responses cover
-      ambiguous loadouts (mixed gear) and confirm the fallback
-      reports a class plus a confidence indication.
-- [ ] DECISIONS.md: graduate D-009 from "deferred to future" status
-      to "implemented as described." The class detection F1 *is not*
-      measured here — there's no labelled dataset and the brief
-      explicitly said this was non-grading. Document this in EVALS.md
-      §3 (the existing "class detection sanity check, not a gate"
-      note) with the actual fixture results.
-- [ ] ARCH.md §5: state payload section now has real schema; remove
-      "PENDING" marks.
-- [ ] Checklist 3.3 ticked + CLAUDE.md §2 → "Section 3 complete;
-      Section 4 (auth & game client) next."
+_Shipped field names differ from this phase's original draft — reconciled to
+reality: gear weapon slot is `weapon` (not `held_item`); `downed_bosses` is
+`list[str]` (not `dict[str,bool]`); models stay in `app/domain/bot.py` (no new
+`state.py`); class signal is Cargo `damagetype` (not `listcat`, finding A1)._
+- [x] State payload schema finalization in `app/domain/bot.py` (commit 2).
+      `StatePayload`: `game_version: str`, `gear: GearState`
+      (`armor`/`accessories`/`weapon: ItemRef | None`),
+      `inventory: list[ItemRef]`, `stats: PlayerStats`
+      (`life`/`max_life`/`mana`/`max_mana`/`defense`),
+      `world: WorldState` (`hardmode: bool`, `downed_bosses: list[str]`,
+      `biome: str`). All additive with safe defaults; round-trip +
+      backward-compat tests in `tests/domain/test_state_payload.py`.
+- [x] `ItemRef`: `{item_id: int=0, name: str="", prefix: str | None=None,
+      stack: int=1}`. `item_id` = Terraria `item.type` = Cargo `itemid`
+      (canonical, localization-stable); `name` for readability.
+- [x] `analyze_loadout` rewritten as a hybrid Cargo-aware classifier
+      (`app/agent/class_detection.py`, commits 1+3, **D-026**):
+      Cargo `damagetype` gated on `type=weapon` (446 weapons, A2) +
+      curated armor/fallback map (Cargo has 0 armor signal, A3) +
+      deterministic vote. Pure Python, no LLM in `analyze_loadout`
+      itself. `item_id`-primary resolution, `name` fallback.
+- [x] Cold-start LLM zero-shot (commit 4): when deterministic detection
+      returns `needs_llm_fallback=True`, `execute_tools` (not
+      `analyze_loadout`) fires `llm_classify` — one `claude-haiku-4-5`
+      call (`max_tokens=8`, prompt `class_fallback.md`) returning one of
+      the four classes or `unknown`. Satisfies D-009's fallback path.
+- [x] Tests: 8 `analyze_loadout` fixtures (`tests/agent/test_tools.py`,
+      unchanged across the swap) against the curated `DEFAULT_CLASSIFIER`;
+      `tests/agent/test_class_detection.py` covers the `ItemClassifier`
+      tiers (synthetic Cargo fixture), `item_id` precedence, refuse-to-boot,
+      and `llm_classify` (mocked Anthropic). No `fixtures/states/` dir —
+      payloads built inline.
+- [x] Tests for the LLM fallback path: `llm_classify` recognized/unknown/
+      noisy/off-vocab replies + a graph-level test proving the fallback
+      fires on empty gear and merges its guess into the tool_result.
+- [x] DECISIONS.md: **D-026** graduates D-009 to fully implemented (hybrid
+      design + the 446-weapon / 0-armor / ~$0.0002-fallback numbers + the
+      CI/gitignore constraint). No F1 gate (no labelled dataset, non-grading);
+      EVALS.md §3 updated with the actual fixture coverage.
+- [x] ARCH.md §5 step 1 + §13.3: finalized `StatePayload` schema and the
+      `item_id`-canonical note; class-detection refs point to D-026.
+- [x] Checklist 3.3 ticked + CLAUDE.md §2 → Section 3 complete; Phase 4.1
+      (auth & game client) next.
 
 ---
 

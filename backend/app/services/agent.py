@@ -5,6 +5,7 @@ from typing import Any
 
 from anthropic.types import TextBlock
 
+from app.agent.class_detection import DEFAULT_CLASSIFIER, ItemClassifier
 from app.agent.graph import build_agent_graph
 from app.core.prompts import LoadedPrompts
 from app.domain.bot import BotAnswer, RoutingDecision, StatePayload
@@ -26,6 +27,7 @@ async def answer(
     anthropic: AnthropicClient,
     retrieval: RetrievalPipeline,
     prompts: LoadedPrompts,
+    classifier: ItemClassifier = DEFAULT_CLASSIFIER,
     parent_span: Any = None,  # StatefulSpanClient | StatefulTraceClient | None
 ) -> BotAnswer:
     """Run the bounded LangGraph agent for state-dependent questions.
@@ -39,7 +41,7 @@ async def answer(
         span = parent_span.span(name="agent.run", input={"query": query})
 
     try:
-        graph = build_agent_graph(retrieval, anthropic, prompts)
+        graph = build_agent_graph(retrieval, anthropic, prompts, classifier)
         initial_state = {
             "messages": [{"role": "user", "content": query}],
             "chunks_seen": [],

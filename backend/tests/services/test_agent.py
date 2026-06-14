@@ -21,6 +21,7 @@ _PROMPTS = LoadedPrompts(
     router="r",
     faq_answer="f",
     agent_system="a" * 100,
+    class_fallback="c" * 100,
 )
 
 _CHUNK = ChunkRef(
