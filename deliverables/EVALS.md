@@ -142,6 +142,18 @@ A test asserts a fake secret (`sk-test-FAKE-not-real`) never appears unredacted 
 
 ---
 
+## 4b. Tenant-Isolation & Erasure Security Tests (blocking, Phase 4.1b)
+
+Not quality thresholds — **blocking security proofs** in the main test suite (CI-gated, run against a real `pgvector` Postgres via testcontainers as the **non-superuser `terramind_app`** role; a superuser would bypass RLS and prove nothing):
+
+- `tests/services/test_rls_isolation.py` — the headline: two real tenants through the real `/bot/ask` path; under B's RLS context a raw SELECT of `messages` returns **zero** of A's rows (by tenant, count, and content). This test **fails if RLS is disabled** — a falsifiable proof, not theater. (Mechanism unit proof: `tests/services/test_rls_context.py`, incl. the fail-closed NULLIF case, D-030.)
+- `tests/api/test_erasure.py` — `DELETE /me` data erasure verified from the RLS-bypassing **owner** connection: the erased tenant's rows are **physically gone**, a second tenant's survive (deletion, not masking); `tenant.erased` audited.
+- `tests/memory/test_short_term.py` — redaction-on-write: a planted `sk-ant-…` never lands in Redis unredacted (the SECURITY §7.2 discipline, at the memory boundary).
+
+A regression that breaks tenant isolation or erasure turns the build **red**. Full design + the deletion-vs-masking methodology in `SECURITY.md §3`.
+
+---
+
 ## 5. Final Submission Numbers
 
 Partially filled as phases land. Remaining `PENDING` values are filled in Phase 7.2.

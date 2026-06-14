@@ -132,16 +132,16 @@ This boundary is graded. Expect to be asked to add a new endpoint or agent tool 
 
 ## 5. Core Data Flow: One `/bot` Turn
 
-_Status: partial (Phase 3.2). Steps 5, 6, 7, 10–11 implemented; steps 1–4, 8–9 pending their respective phases._
+_Status: partial. Steps 3 (RLS context), 5, 6, 7, 8, 10–11 implemented; the mod (1–2) is Phase 4.2+, guardrails (4, 9) are Phase 6.1._
 
 1. In game, the player types `/bot <question>`. The mod (`client/`) collects a **state payload** (`StatePayload`, finalized Phase 3.3): `gear` (`armor` / `accessories` / `weapon`, each an `ItemRef{item_id, name, prefix, stack}`), `inventory: list[ItemRef]`, `stats` (`PlayerStats{life, max_life, mana, max_mana, defense}`), `world` (`hardmode`, `downed_bosses: list[str]`, `biome`), and the tenant's selected `game_version`. `item_id` (= Terraria `item.type` = Cargo `itemid`) is the canonical gear key; `name` is for readability. _(Schema implemented Phase 3.3; mod producer Phase 4.2)_
-2. The mod presents its saved account token (see §6 / D-027) to `POST /client/token` and receives a short-lived JWT. It POSTs `{message, state}` to `POST /bot/ask` with the Bearer token. _(Phase 4.1a/4.3 — design)_
-3. `app/api/bot.py` authenticates, and `services` sets the **RLS tenant context** on the session from the JWT's `tenant_id`. _(Phase 4.1a — `app/api/bot.py` exists without auth; JWT + RLS context deferred)_
+2. The mod presents its saved refresh token (see §6 / D-027) to `POST /auth/refresh` and receives a short-lived access JWT. It POSTs `{message, state, session_id?}` to `POST /bot/ask` with the Bearer token. _(`/auth/refresh` implemented Phase 4.1a; mod producer Phase 4.3)_
+3. `app/api/bot.py` authenticates via the access-JWT dependency; the **service** sets the **RLS tenant context** (`set_tenant_context`, SET LOCAL) from the JWT's `tenant_id` before each tenant-scoped transaction. _(Phase 4.1a/4.1b — **implemented**; D-030)_
 4. **Guardrails input check** (`app/guardrails/`): block prompt-injection / progression jailbreaks ("give me dev items") before any LLM call. _(Phase 6.1 — design)_
 5. **Classifier router** (`app/services/router.py`): an easy FAQ ("Copper Shortsword recipe?") goes to a deterministic RAG flow; a hard, state-dependent query ("why do I keep dying to Skeletron?") goes to the agent. _(Phase 3.1 — **implemented**; single LLM call to `claude-haiku-4-5`, D-023)_
 6. **Bounded agent** (`app/agent/`, LangGraph): runs up to **MAX_ITERATIONS = 5** plan→execute cycles (D-024) over three tools — `query_wiki` (RAG, version-filtered, D-008), `analyze_loadout` (reads the state payload; hybrid Cargo `damagetype` + curated armor map + LLM zero-shot cold-start fallback per D-026, implementing D-009), `suggest_next_boss` (deterministic progression tree). The loop is `plan → (execute_tools | END)`; `execute_tools → (plan | synthesize_cap)` when the cap is hit. One iteration can dispatch multiple tools (D-024 caveat). _(Phase 3.2 — **implemented**; `app/agent/graph.py` + `app/services/agent.py`; replaces the 3.1 stub. Cost/latency profile in D-025.)_
 7. **RAG retrieval** (`app/rag/`): dense query against the shared corpus, filtered to the tenant's selected `game_version` (D-005, D-008). _(Phase 2.4 — **implemented**; `app/rag/pipeline.py`, dense-only, HNSW)_
-8. **Short-term memory** (`app/memory/`): the current session's recent turns are loaded from Redis and the new turn appended, under TTL (§8, P-004). _(Phase 3.4+ — design)_
+8. **Short-term memory** (`app/memory/`, `app/services/memory.py`): the service resolves/creates the session (txn 1) and, after the answer, **records the turn** to Postgres `messages` (RLS-scoped) + the Redis list (txn 2), redacted, N=20/TTL=2 h (§8, D-031). The agent runs between the two short transactions with no DB held. The Redis **read** (`get_history`) is built but not yet consumed (§8). _(Phase 4.1b — **implemented**)_
 9. **Guardrails output check**: scan the drafted reply before it leaves the boundary. _(Phase 6.1 — design)_
 10. The whole turn runs under one Langfuse trace opened per request by `RequestContextMiddleware`; router, RAG, and LLM calls are child spans. _(Phase 3.1 — **implemented**; trace tree verified: `http_request → bot.ask → router.classify → router.llm / faq.answer → rag.retrieve + faq.llm`)_
 11. `POST /bot/ask` returns a **single JSON reply** (the game chat renders one message via `Main.NewText` — SSE streaming into a game chat line is unnecessary here; the Streamlit test chat in §13.1 may stream for development convenience). _(Phase 3.1 — **implemented**; `app/api/bot.py`, no auth gate yet)_
@@ -191,12 +191,12 @@ _Status: auth + `/bot/ask` gating landed Phase 4.1a; `/me/*`, `/versions`, `/adm
 | `POST` | `/auth/logout` | Player | Denylist the **refresh** token's `jti` (D-029) + `session.revoked` audit row; the mod also deletes its saved token. **Implemented Phase 4.1a.** |
 | `POST` | `/auth/guest` | Public | Create an ephemeral guest tenant; returns an **access-only** token (no refresh — guests are ephemeral). **Implemented Phase 4.1a.** |
 | `GET` | `/healthz` | Public | Liveness probe. _(implemented Phase 1.3)_ |
-| `POST` | `/bot/ask` | Player (**access JWT**) | Send `{message, state}`; returns a single JSON advice reply. **Gated by the access-JWT dependency Phase 4.1a** (a refresh/denylisted/missing token → 401). Router Phase 3.1, agent Phase 3.2, class detection Phase 3.3. |
+| `POST` | `/bot/ask` | Player (**access JWT**) | Send `{message, state, session_id?}`; returns `{answer, source_chunks, routing, session_id}`. **Phase 4.1b:** the service resolves/creates the session, runs routing, and records the turn (Postgres under RLS + Redis) via the two-short-transactions pattern. Gated by the access-JWT dependency (4.1a). Router 3.1, agent 3.2, class detection 3.3. |
 | _(dropped)_ | ~~`/client/token`~~ | — | **Removed (D-027/D-029):** the access+refresh split makes the mod's saved-token exchange identical to `/auth/refresh`; folded in there. |
 | `GET` | `/versions` | Player | List available wiki corpus versions. |
 | `GET` | `/me/preferences` | Player | Read own preferences (incl. selected version). |
 | `PATCH` | `/me/preferences` | Player | Update preferences. |
-| `DELETE` | `/me` | Player | Right to erasure — purge own Postgres rows + Redis session (audit-logged). |
+| `DELETE` | `/me` | Player (access JWT) | **Conversation/data erasure (D-032), implemented Phase 4.1b** — purges the tenant's `messages`/`sessions` (RLS-scoped DELETE) + Redis history keys + a `tenant.erased` audit row. **Keeps the account row** (full account/email deletion → P-015). |
 | `GET` | `/admin/versions/check` | operator | Check whether the live wiki has a newer version than the latest stored snapshot. |
 | `POST` | `/admin/rerag` | operator | Trigger a re-rag (snapshot + embed) as a background job (button is stretch; script is must-have). |
 | `GET` | `/admin/tenants` | operator | List tenants. |
@@ -206,12 +206,12 @@ _Status: auth + `/bot/ask` gating landed Phase 4.1a; `/me/*`, `/versions`, `/adm
 
 ### 8.1 Short-Term (Redis) — the only memory tier
 
-Per-session message history as a Redis list under `session:{tenant_id}:{session_id}:messages`; each element a JSON `{"role", "content"}`.
+_Status: **implemented Phase 4.1b.**_ Per-session message history as a Redis list under `session:{tenant_id}:{session_id}:messages`; each element a JSON `{"role", "content"}`.
 
-- **TTL:** value → **P-004** (defended during the memory phase).
-- **Sliding window:** recent-N turns via `RPUSH` + `LTRIM`; N → P-004.
-- **Module:** `app/memory/short_term.py` — `append_message`, `get_history`, `clear`.
-- **Injection:** the Redis client is passed as a parameter; no global import.
+- **Window / TTL:** N=20 messages (`RPUSH` + `LTRIM`), TTL=2 h sliding `EXPIRE` — **D-031** (defended estimates, config-overridable; graduates P-004).
+- **Module:** `app/memory/short_term.py` — `append_message`, `get_history`, `clear`. Redis client **injected** (no global import). `content` is **redacted before the write** (SECURITY §7.1).
+- **Dual-write into `/bot/ask`:** the turn is persisted to **both** Postgres `messages` rows (RLS-scoped — the per-tenant data the isolation proof operates on) and the Redis list, orchestrated by `app/services/memory.py` using the **two-short-transactions** pattern: `resolve_session` (txn 1, sets RLS context) → agent/FAQ runs with **no DB transaction held** → `record_turn` (txn 2, re-sets context). `set_config(..., true)` is `SET LOCAL` (per-transaction), so each tenant-scoped txn re-sets the context (D-030).
+- **Read path built-but-not-yet-consumed (by design):** `get_history` is implemented and tested but **not** loaded into `/bot/ask`'s request path — the agent doesn't consume conversational history yet, and adding a hot-path read with no consumer would be hollow plumbing. It wires to a consumer (agent memory / a history endpoint) in a later phase. Written-but-not-yet-read is intentional, not dead code.
 
 ### 8.2 Long-Term — intentionally none
 
