@@ -422,3 +422,15 @@ The full `StatePayload` JSON is written via the mod logger to tModLoader's **`cl
 - **Armor vs accessories** — `armor[0..2]` = the 3 armor pieces, `armor[3..9]` = accessories (not vanity/social).
 - **`prefix`** — should be a name like "Unreal"/"Legendary" (via `Lang.prefix`), `null` if unmodified — not a number/garbage.
 - **`biome`** — sensible for your zone, or `"forest"` default.
+
+### Authenticated chat (Phase 4.3)
+
+The mod is a full authenticated chat client. Nothing on disk but a **revocable token** — never a password (D-027, SECURITY §4).
+
+1. **Backend URL (optional):** Mod Configuration → TerraMind → `BackendUrl` (default `http://localhost:8000`, D-028). The config holds the URL **only** — no credentials.
+2. **Log in:** `/bot login <email> <password>` → `POST /auth/jwt/login` (**form-encoded**). The password is used for that one request and **discarded** — never written to disk, never logged. Chat shows `logged in as <email>`; the access+refresh pair is saved to `token.json` under the tModLoader save dir (`<save>/TerraMind/token.json`).
+3. **Ask:** `/bot <question>` → `POST /bot/ask` with the Bearer access token + live `StatePayload` → contextual answer in chat.
+4. **Stay logged in:** each launch loads `token.json` and exchanges the **refresh** token at `POST /auth/refresh` for a fresh access JWT (world-entry: `session restored — logged in`); a mid-session 401 triggers the same refresh + one retry. Survives a Terraria restart, durable past the 30-min access TTL.
+5. **Log out:** `/bot logout` deletes `token.json` **and** `POST /auth/logout` (denylists the refresh `jti`, D-029) → re-login next launch; the old token is rejected.
+
+**Verification (no CI):** all three 4.3 commits are evidenced verbatim from `client.log` in `client/VERIFICATION.md` — the in-repo gate that stands in for a green check.

@@ -404,7 +404,7 @@ reality: gear weapon slot is `weapon` (not `held_item`); `downed_bosses` is
 
 ### Phase 4.1a · Backend auth & token exchange — `feat/15-auth`
 
-**Goal:** `fastapi-users` + JWT (signing key from Vault, scaffolded in 1.5); register / login / guest; `POST /client/token` (saved account token → short-lived JWT); JWT sets the RLS tenant context in the service layer; player/operator roles; the Redis denylist for logout/revocation (D-029). **Fully CI-testable; must land 100% green before any C#.**
+**Goal:** `fastapi-users` + JWT (signing key from Vault, scaffolded in 1.5); register / login / guest; the saved-token→access-JWT exchange (**shipped as `POST /auth/refresh`** — `/client/token` was folded in, see closeout); JWT sets the RLS tenant context in the service layer; player/operator roles; the Redis denylist for logout/revocation (D-029). **Fully CI-testable; must land 100% green before any C#.**
 
 #### Closeout
 _Shipped vs the draft: token issuance is **custom** (`app/infra/jwt_tokens.py`,
@@ -512,8 +512,10 @@ not CI** (ARCH §13.3) — 7 `/bot test` runs against a live character via
       unequip → `inventory`), `defense` tracks armor (0→1→3→0), `life` tracks HP,
       `max_life`/`max_mana` correct (100/20 fresh; `statLifeMax2`/`statManaMax2`
       names verified), prefixes render as **names** ("Lazy"/"Annoying", null when
-      unmodified — `Lang.prefix` works), shape matches schema exactly. Nullable
-      `string?` warnings (CS8632) silenced via `<Nullable>enable</Nullable>`.
+      unmodified — `Lang.prefix` works), shape matches schema exactly. _(Nullable
+      `string?` CS8632: the `<Nullable>enable</Nullable>` csproj property does NOT
+      reach the tModLoader compile — corrected in Phase 4.3 with per-file
+      `#nullable enable` directives; see `client/VERIFICATION.md`.)_
 - [x] **Verified-by-adjacency (not directly exercised, low risk):**
       `downed_bosses` (no bosses down on the test character — but `BossFlags.cs`
       **compiled clean**, so all `NPC.downed*`/`WorldGen.crimson` names are valid)
@@ -525,27 +527,37 @@ not CI** (ARCH §13.3) — 7 `/bot test` runs against a live character via
 
 ### Phase 4.3 · Mod login + token persistence + transport — `feat/18-client-transport`
 
-**Goal:** config-driven login (D-027): username/password once → `/auth/jwt/login` → discard password → save token; each launch exchange token at `/client/token` → short-lived JWT; `/bot logout` deletes local token + calls `/auth/logout`; async `HttpClient` (single static instance, spike §findings); render reply via `Main.NewText` with `QueueMainThreadAction` marshaling. **Not CI-testable** — manual done-when. Resolves P-005's client half.
+**Goal:** chat-command login (D-027, 4.3 revision): `/bot login <user> <pass>` → `/auth/jwt/login` (form-encoded) → discard password → persist token pair to `token.json` (config holds the backend URL **only**, not creds); each launch exchange the refresh token at `POST /auth/refresh` → fresh access JWT (also on a 401); `/bot logout` deletes `token.json` + `POST /auth/logout` (denylist); single static async `HttpClient` (spike §findings); render reply via `Print()`/`QueueMainThreadAction`. **Not CI-testable** — manual done-when, evidence in `client/VERIFICATION.md`. Resolves P-005's client half.
 
 #### Closeout
-- [ ] Config-driven first-launch login: read username/password from mod config,
-      `POST /auth/jwt/login`, **discard the password immediately** (never persist).
-      Backend URL from config, default `http://localhost:8000` (D-028).
-- [ ] Token persistence: save the returned token in the mod config dir; on each
-      launch exchange it at `POST /client/token` for a short-lived JWT. Stay
-      logged in across restarts (no re-typing).
-- [ ] `/bot logout`: delete the saved token locally **and** `POST /auth/logout`
-      (server denylist, D-029) → forces re-login next launch.
-- [ ] Transport: a single static `HttpClient` for the mod lifetime; fire-and-
-      forget the call with a synchronous "thinking…" first; **marshal every
-      `Main.*` UI call back via `QueueMainThreadAction`** (spike §critical).
-      Send `{message, state}` with the Bearer JWT.
-- [ ] **Manual done-when (human runs Terraria):** an authenticated `/bot` call
-      from the mod returns and renders in-game; the token **survives a Terraria
-      restart** (stay-logged-in proven); `/bot logout` forces re-login on the next
-      launch (saved token gone + server rejects the old `jti`). **Ticks on manual
-      verification, not CI.**
-- [ ] RUNBOOK + SECURITY.md: document the login/logout flow + password-never-stored.
+- [x] **Chat-command login** (4.3 revision of D-027): `/bot login <user> <pass>` →
+      `POST /auth/jwt/login` (**form-encoded** — the OAuth2PasswordRequestForm trap),
+      **password discarded** after the one call (in-memory only, never on disk/logged).
+      Config holds the **backend URL only** (D-028), not creds — `ClientSide ModConfig`
+      auto-persists, so config creds would be a plaintext password on disk. _(commit 1)_
+- [x] **Token persistence + restore:** token pair saved to `token.json` under
+      `Main.SavePath/TerraMind/` (**tokens only, no password** — `cat`-confirmed); loaded
+      on launch, fail-soft on missing/corrupt → fall back to login. World-entry
+      confirmation closes the silent-restore gap. _(commit 2; `client/VERIFICATION.md`)_
+- [x] **`/auth/refresh` on launch + on 401:** a restored session refreshes its access
+      token at world entry (`Web Request: /auth/refresh` log-confirmed — not a cached
+      token) and a mid-session 401 triggers the same refresh + one retry (shared
+      `AuthFlow`) → durable past the 30-min access TTL. _(commit 3)_
+- [x] **`/bot logout`:** deletes `token.json` locally **and** `POST /auth/logout`
+      (denylists the refresh `jti` server-side, D-029) → re-login required next launch,
+      old token rejected. _(commit 3)_
+- [x] **Transport:** a single static `HttpClient` (spike §); state read on the GAME
+      thread pre-`await`, fire-and-forget with a `thinking…` first, **every `Main.*` via
+      `Print()`/`QueueMainThreadAction`** (spike §critical); real `AskResponse`
+      (`answer`+`session_id`) parsed, `session_id` threaded for memory continuity.
+- [x] **Manual done-when (verified in-game, no CI):** authed `/bot` renders in-game;
+      the login **survives a full Terraria restart** (persist + refresh proven); `/bot logout`
+      forces re-login (`token.json` gone via `ls` + server denylist). All evidenced
+      **verbatim** from `client.log` in `client/VERIFICATION.md` — **the PR's gate**.
+- [x] **RUNBOOK §10 + SECURITY §4:** login/logout flow + token-only / password-never-stored
+      documented. Build clean: **0 errors / 0 warnings** after fixing the 4.2 nullable claim
+      (csproj `<Nullable>` never reached the tML compile → per-file `#nullable enable`;
+      Checklist 4.2 + csproj comment corrected). **P-016** logged (agent under-uses live state).
 
 ### Phase 4.4 · End-to-end in-game — `feat/19-client-e2e`
 

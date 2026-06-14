@@ -6,8 +6,14 @@
 	<Import Project="..\tModLoader.targets" />
 
 	<PropertyGroup>
-		<!-- Enable nullable reference types so `string?` annotations on the DTOs
-		     (ItemRefDto.Prefix, GearDto.Weapon) compile without CS8632. -->
+		<!-- Nullable reference types. NOTE: the tModLoader build does NOT honor
+		     this csproj <Nullable> property — it kept emitting CS8632 on every `?`
+		     annotation (verified Phase 4.3, on the same StateDtos.cs:24/40 that 4.2
+		     thought it had silenced). The actual nullable context is set instead by a
+		     `#nullable enable` directive at the top of each file that uses `?`
+		     (State/StateDtos, Transport/Session, Transport/TransportDtos,
+		     Transport/AuthStore, TerraMind). This property is kept only because the
+		     IDE/Roslyn analyzer DOES honor it (for IntelliSense). -->
 		<Nullable>enable</Nullable>
 	</PropertyGroup>
 
