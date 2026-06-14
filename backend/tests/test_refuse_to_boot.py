@@ -8,6 +8,7 @@ from app.core.lifespan import (
     _load_prompts,
     _validate_anthropic_key,
     check_eval_thresholds,
+    check_redis,
 )
 from app.core.prompts import LoadedPrompts
 from app.infra.tracing import init_langfuse
@@ -103,6 +104,14 @@ def test_eval_thresholds_rag_max_zero_refuses(tmp_path: Path) -> None:
     bad.write_text("rag:\n  p95_latency_ms_max: 0\n")
     with pytest.raises(RuntimeError, match="REFUSING TO BOOT"):
         check_eval_thresholds(str(bad))
+
+
+# ── Redis ─────────────────────────────────────────────────────────────────────
+
+
+async def test_redis_unreachable_raises() -> None:
+    with pytest.raises(RuntimeError, match="REFUSING TO BOOT"):
+        await check_redis("redis://localhost:19999/0")
 
 
 # ── Anthropic key validation ──────────────────────────────────────────────────

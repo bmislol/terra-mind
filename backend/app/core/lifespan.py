@@ -6,6 +6,7 @@ from typing import Any
 
 import yaml
 from fastapi import FastAPI
+from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -97,6 +98,23 @@ def _load_prompts(prompts_dir: Path) -> LoadedPrompts:
     )
 
 
+async def check_redis(url: str) -> Redis:
+    """Connect to Redis and PING; refuse to boot if unreachable (D-029 denylist).
+
+    Returns the live client (cached on app.state). decode_responses=True so the
+    denylist reads back ``str`` rather than ``bytes``.
+    """
+    client: Redis = Redis.from_url(url, decode_responses=True)
+    try:
+        await client.ping()
+    except Exception as exc:
+        await client.aclose()
+        raise RuntimeError(
+            f"REFUSING TO BOOT: Redis unreachable at {url} — {exc}"
+        ) from exc
+    return client
+
+
 def check_eval_thresholds(path: str) -> None:
     resolved = Path(path)
     if not resolved.exists():
@@ -148,6 +166,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.db_engine = engine
     app.state.session_factory = make_session_factory(engine)
 
+    # ── Redis (session-revocation denylist, D-029; short-term memory later) ─────
+    redis_client = await check_redis(settings.redis_url)
+    app.state.redis = redis_client
+
     # ── Embedding model + retrieval pipeline ───────────────────────────────────
     # Embedder loads ~90 MB of model weights — done once at startup, never
     # per-query.  RetrievalPipeline holds no extra state beyond these two deps.
@@ -173,5 +195,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
+    await redis_client.aclose()
     await engine.dispose()
     langfuse.flush()

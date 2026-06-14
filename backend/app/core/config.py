@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     langfuse_secret_key: str = ""
     langfuse_host: str = "http://langfuse:3000"
 
+    # Redis — session-revocation denylist (D-029); short-term memory later.
+    redis_url: str = "redis://redis:6379/0"
+
     # Path to eval_thresholds.yaml, relative to the backend/ working directory.
     eval_thresholds_path: str = "../eval_thresholds.yaml"
 
