@@ -6,6 +6,11 @@ from anthropic.types import ToolUseBlock
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from app.agent.class_detection import (
+    DEFAULT_CLASSIFIER,
+    ItemClassifier,
+    llm_classify,
+)
 from app.agent.state import AgentState
 from app.agent.tools import (
     ALL_TOOLS,
@@ -27,11 +32,12 @@ def build_agent_graph(
     retrieval: RetrievalPipeline,
     anthropic_client: AnthropicClient,
     prompts: LoadedPrompts,
+    classifier: ItemClassifier = DEFAULT_CLASSIFIER,
 ) -> CompiledStateGraph:  # type: ignore[type-arg]
     """Return a compiled LangGraph agent that handles hard, state-dependent questions.
 
-    retrieval, anthropic_client, and prompts are captured in closures — they are
-    infrastructure dependencies, not serializable state.
+    retrieval, anthropic_client, prompts, and classifier are captured in
+    closures — they are infrastructure dependencies, not serializable state.
     """
 
     async def plan(state: AgentState) -> dict[str, Any]:
@@ -80,7 +86,20 @@ def build_agent_graph(
                     )
                 payload = [{k: v for k, v in r.items() if k != "score"} for r in result]
             elif name == "analyze_loadout":
-                payload = analyze_loadout(sp)
+                payload = analyze_loadout(sp, classifier=classifier)
+                # Cold-start: deterministic detection found no class signal →
+                # fire the LLM zero-shot fallback (D-009) and merge its guess
+                # so the tool_result shows both outputs. Fires in execute_tools,
+                # not analyze_loadout (which must stay pure for its fixtures).
+                if payload.get("needs_llm_fallback"):
+                    payload = {
+                        **payload,
+                        "llm_fallback": await llm_classify(
+                            sp,
+                            anthropic=anthropic_client,
+                            prompt=prompts.class_fallback,
+                        ),
+                    }
             elif name == "suggest_next_boss":
                 payload = suggest_next_boss(sp)
             else:

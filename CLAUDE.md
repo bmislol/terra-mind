@@ -28,7 +28,7 @@ Tenant isolation is enforced by Postgres Row-Level Security; a short-lived JWT c
 
 **Execution Rule:** Always act as a technical planner first. For any non-trivial task, propose a step-by-step plan and wait for approval before writing code. Once approved, write the code.
 
-**Status:** Phases 1.1–3.2 complete. **Phase 3.2 delivered:** `/bot/ask` agent path now serves real progression-aware answers via a bounded LangGraph loop (`app/agent/graph.py` + `app/services/agent.py`; the 3.1 `agent_stub.py` is deleted) over three tools — `query_wiki` (RAG), `analyze_loadout` (hardcoded class dict; Cargo-aware in 3.3), `suggest_next_boss` (deterministic progression tree); `MAX_ITERATIONS=5` (D-024, graduates P-008); measured median cost ~$0.005/call, p95 ~$0.020/call, median latency ~7 s (D-025); 181/181 tests green; smoke test verified end-to-end. **Open polish items:** P-009 (Langfuse 2.60.10 UI shows tokens as 0/0), P-010 (cache compiled graph on app.state), P-012 (cap chunks_seen length), P-013 (nested agent trace spans) — none blocking. **Section 3 continues with Phase 3.3 (state schema finalization + LLM cold-start class fallback) next** on `feat/14-state-class`.
+**Status:** **Section 3 complete. Phases 1.1–3.3 shipped.** Router + bounded LangGraph agent + Cargo-aware class detection + LLM zero-shot fallback all live on `/bot/ask`. **Phase 3.3 delivered:** finalized `StatePayload` schema (`gear`/`inventory`/`stats`/`world`, `ItemRef{item_id,name,prefix,stack}`, `item_id` canonical); hybrid class detection (`app/agent/class_detection.py`, **D-026**) = Cargo `damagetype` for 446 weapon rows / 445 item_ids (gated on `type=weapon`, ~22× the 3.2 dict) + curated armor/fallback map (Cargo has 0 armor signal) + LLM zero-shot fallback (~$0.0002/call, cold-start only); `ItemClassifier` cached on `app.state` at lifespan (refuse-to-boot if `items.json` missing/`<100` rows); 208/208 tests green. Cargo data is gitignored → CI never boots the real lifespan (uses curated `DEFAULT_CLASSIFIER` + synthetic fixtures). **Open polish items (none blocking):** P-009 (Langfuse UI tokens 0/0), P-010 (cache compiled graph), P-012 (cap chunks_seen), P-013 (nested agent trace spans). **Next: Section 4, Phase 4.1 (auth + JWT + tenant isolation)** on `feat/14-auth`.
 
 Before suggesting any work, read these files in order:
 1. `Checklist.md` — granular phase-by-phase progress; the source of truth for *what to build next*. **You maintain this file** — update it whenever a phase starts or finishes.
@@ -53,7 +53,7 @@ Full rationale and numbers in `deliverables/DECISIONS.md`. Summary:
 | Tenancy (D-006) | Postgres RLS; JWT sets the tenant context |
 | Secrets (D-007) | Vault + `vault-init`; real secrets only in uncommitted `.env`; `anthropic.api_key` + `jwt.signing_key` |
 | Retrieval (D-008) | **Dense-only first**; hybrid only on measured underperformance; no HyDE |
-| Class detection (D-009) | Live equipped-gear read + LLM zero-shot cold-start; trained model = future work |
+| Class detection (D-009 → D-026) | Hybrid: Cargo `damagetype` (446 weapons, gated on type=weapon) + curated armor map + LLM zero-shot cold-start; trained model confirmed not needed |
 | Memory (D-010) | **Short-term Redis + TTL only**; no long-term memory |
 | Frontends (D-011) | React `frontend-user/` (config portal) + Streamlit `frontend-admin/` (operator/test); no widget, no `demo/` |
 | Guardrails (D-012) | Lightweight deterministic + LLM-judge filter; NeMo = stretch |

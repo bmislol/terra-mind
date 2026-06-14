@@ -6,7 +6,7 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock .python-version ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    UV_HTTP_TIMEOUT=300 uv sync --frozen --no-dev
 
 COPY alembic.ini ./
 COPY app/ app/

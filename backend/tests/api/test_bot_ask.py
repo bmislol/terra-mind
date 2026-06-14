@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from app.agent.class_detection import ItemClassifier
 from app.api.bot import bot_router
 from app.core.prompts import LoadedPrompts
 from app.domain.bot import BotAnswer, ChunkRef, RoutingDecision, StatePayload
@@ -26,10 +27,12 @@ def _make_app() -> FastAPI:
     test_app.include_router(bot_router)
     test_app.state.anthropic = MagicMock(spec=AnthropicClient)
     test_app.state.retrieval_pipeline = MagicMock(spec=RetrievalPipeline)
+    test_app.state.item_classifier = MagicMock(spec=ItemClassifier)
     test_app.state.prompts = LoadedPrompts(
         router="You are a router.",
         faq_answer="You are a FAQ assistant.",
         agent_system="You are an agent.",
+        class_fallback="You are a class classifier.",
     )
     return test_app
 

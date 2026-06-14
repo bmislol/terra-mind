@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -8,6 +9,7 @@ from fastapi import FastAPI
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from app.agent.class_detection import ItemClassifier
 from app.core.config import get_settings
 from app.core.prompts import LoadedPrompts
 from app.core.threshold_directions import zero_is_valid_for_key
@@ -17,6 +19,8 @@ from app.infra.tracing import init_langfuse
 from app.infra.vault import load_secrets
 from app.rag.embedder import Embedder
 from app.rag.pipeline import RetrievalPipeline
+
+_log = logging.getLogger(__name__)
 
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
@@ -68,6 +72,7 @@ _PROMPT_FILES: tuple[tuple[str, str], ...] = (
     ("router", "router.md"),
     ("faq_answer", "faq_answer.md"),
     ("agent_system", "agent_system.md"),
+    ("class_fallback", "class_fallback.md"),
 )
 
 
@@ -88,6 +93,7 @@ def _load_prompts(prompts_dir: Path) -> LoadedPrompts:
         router=loaded["router"],
         faq_answer=loaded["faq_answer"],
         agent_system=loaded["agent_system"],
+        class_fallback=loaded["class_fallback"],
     )
 
 
@@ -150,6 +156,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.retrieval_pipeline = RetrievalPipeline(
         session_factory=app.state.session_factory,
         embedder=embedding_model,
+    )
+
+    # ── Item classifier (class detection, D-009) ───────────────────────────────
+    # Builds the Cargo-backed weapon index once at startup; refuse-to-boot if the
+    # Cargo items file is missing or truncated.  Curated armor map is in-code.
+    item_classifier = ItemClassifier.from_cargo_file(settings.cargo_items_path)
+    app.state.item_classifier = item_classifier
+    # Permanent evidence (logs + demo) that the Cargo-backed classifier loaded.
+    # 0 cargo weapons here = lifespan did not load Cargo (stale image / wrong path).
+    _log.info(
+        "item_classifier ready: %d cargo weapons (%d cargo items)",
+        item_classifier.cargo_weapon_count,
+        item_classifier.cargo_item_count,
     )
 
     yield

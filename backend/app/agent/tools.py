@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.domain.bot import StatePayload
+from app.agent.class_detection import DEFAULT_CLASSIFIER, ItemClassifier
+from app.domain.bot import ItemRef, StatePayload
 from app.infra.anthropic import ToolParam
 from app.rag.pipeline import RetrievalPipeline
 
@@ -68,97 +69,8 @@ ALL_TOOLS: list[ToolParam] = [
     SUGGEST_NEXT_BOSS_TOOL,
 ]
 
-# ── Hardcoded class detection dict (Phase 3.2; Cargo-aware in Phase 3.3) ─────
-
-_CLASS_ITEMS: dict[str, str] = {
-    # Melee armor
-    "shadow helmet": "melee",
-    "shadow scalemail": "melee",
-    "shadow greaves": "melee",
-    "crimson helmet": "melee",
-    "crimson scalemail": "melee",
-    "crimson greaves": "melee",
-    "molten helmet": "melee",
-    "molten breastplate": "melee",
-    "molten greaves": "melee",
-    "cobalt helmet": "melee",
-    "cobalt breastplate": "melee",
-    "cobalt leggings": "melee",
-    "mythril helmet": "melee",
-    "hallowed mask": "melee",
-    "hallowed plate mail": "melee",
-    "hallowed greaves": "melee",
-    "chlorophyte mask": "melee",
-    # Melee weapons
-    "copper shortsword": "melee",
-    "iron shortsword": "melee",
-    "gold broadsword": "melee",
-    "platinum broadsword": "melee",
-    "fiery greatsword": "melee",
-    "nights edge": "melee",
-    "night's edge": "melee",
-    "terra blade": "melee",
-    "excalibur": "melee",
-    "influx waver": "melee",
-    # Ranger armor
-    "jungle shirt": "ranger",
-    "jungle pants": "ranger",
-    "fossil helmet": "ranger",
-    "fossil plate": "ranger",
-    "fossil greaves": "ranger",
-    "cobalt hat": "ranger",
-    "mythril hat": "ranger",
-    "hallowed headgear": "ranger",
-    "chlorophyte helmet": "ranger",
-    # Ranger weapons
-    "musket": "ranger",
-    "the undertaker": "ranger",
-    "boomstick": "ranger",
-    "molten fury": "ranger",
-    "phoenix blaster": "ranger",
-    "megashark": "ranger",
-    "uzi": "ranger",
-    "chlorophyte shotbow": "ranger",
-    "sdmg": "ranger",
-    "s.d.m.g.": "ranger",
-    # Mage armor
-    "meteor helmet": "mage",
-    "meteor suit": "mage",
-    "meteor leggings": "mage",
-    "wizard hat": "mage",
-    "jungle hat": "mage",
-    "spectre mask": "mage",
-    "spectre hood": "mage",
-    "spectre robe": "mage",
-    "spectre pants": "mage",
-    "chlorophyte headgear": "mage",
-    # Mage weapons
-    "space gun": "mage",
-    "water bolt": "mage",
-    "magic missile": "mage",
-    "demon scythe": "mage",
-    "crystal storm": "mage",
-    "golden shower": "mage",
-    "razorblade typhoon": "mage",
-    "last prism": "mage",
-    # Summoner armor
-    "bee helmet": "summoner",
-    "bee breastplate": "summoner",
-    "bee greaves": "summoner",
-    "spider mask": "summoner",
-    "spider breastplate": "summoner",
-    "spider greaves": "summoner",
-    "tiki mask": "summoner",
-    "tiki shirt": "summoner",
-    "tiki pants": "summoner",
-    # Summoner weapons
-    "imp staff": "summoner",
-    "hornet staff": "summoner",
-    "spider staff": "summoner",
-    "optic staff": "summoner",
-    "raven staff": "summoner",
-}
-
+# Class detection now lives in app/agent/class_detection.py (Cargo-aware,
+# D-009). The curated item→class map moved there as CURATED_ITEM_CLASS.
 _CLASSES = ("melee", "ranger", "mage", "summoner")
 
 
@@ -216,21 +128,25 @@ async def query_wiki(
     ]
 
 
-def analyze_loadout(state: StatePayload) -> dict[str, Any]:
-    """Detect player class from equipped items via hardcoded item→class dict."""
-    equipped: list[str] = []
-    for item in state.gear.armor:
-        if item.name:
-            equipped.append(item.name.lower())
-    if state.gear.weapon and state.gear.weapon.name:
-        equipped.append(state.gear.weapon.name.lower())
-    for item in state.gear.accessories:
-        if item.name:
-            equipped.append(item.name.lower())
+def analyze_loadout(
+    state: StatePayload,
+    *,
+    classifier: ItemClassifier = DEFAULT_CLASSIFIER,
+) -> dict[str, Any]:
+    """Detect player class from equipped items via the ItemClassifier (D-009).
+
+    Resolves each gear item by ``item_id`` first (Cargo weapon index / armor
+    bridge), falling back to ``name`` (curated map). The default classifier is
+    curated-only (CI-safe); production injects a Cargo-backed one.
+    """
+    equipped: list[ItemRef] = list(state.gear.armor)
+    if state.gear.weapon:
+        equipped.append(state.gear.weapon)
+    equipped.extend(state.gear.accessories)
 
     votes: dict[str, int] = {c: 0 for c in _CLASSES}
-    for name in equipped:
-        cls = _CLASS_ITEMS.get(name)
+    for item in equipped:
+        cls = classifier.classify(item_id=item.item_id, name=item.name)
         if cls:
             votes[cls] += 1
 

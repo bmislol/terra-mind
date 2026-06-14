@@ -27,6 +27,7 @@ def _prompts() -> LoadedPrompts:
         agent_system=(
             "You are a Terraria survival advisor with tools. Answer in 3-5 sentences."
         ),
+        class_fallback="Infer the class. One word.",
     )
 
 
@@ -64,6 +65,9 @@ def _make_graph(
 ) -> CompiledStateGraph:  # type: ignore[type-arg]
     mock_anthropic = MagicMock()
     mock_anthropic.chat_with_tools = mock_chat_with_tools
+    # analyze_loadout on empty-gear state triggers the llm_classify fallback
+    # (commit 4), which calls .chat — stub it so multi-tool tests don't hang.
+    mock_anthropic.chat = AsyncMock(return_value=("unknown", 0, 0))
     mock_retrieval = MagicMock(spec=RetrievalPipeline)
     mock_retrieval.retrieve = AsyncMock(return_value=[])
     return build_agent_graph(mock_retrieval, mock_anthropic, _prompts())
