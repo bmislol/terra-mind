@@ -28,7 +28,7 @@ Tenant isolation is enforced by Postgres Row-Level Security; a short-lived JWT c
 
 **Execution Rule:** Always act as a technical planner first. For any non-trivial task, propose a step-by-step plan and wait for approval before writing code. Once approved, write the code.
 
-**Status:** **Section 3 complete. Phases 1.1–3.3 shipped.** Router + bounded LangGraph agent + Cargo-aware class detection + LLM zero-shot fallback all live on `/bot/ask`. **Phase 3.3 delivered:** finalized `StatePayload` schema (`gear`/`inventory`/`stats`/`world`, `ItemRef{item_id,name,prefix,stack}`, `item_id` canonical); hybrid class detection (`app/agent/class_detection.py`, **D-026**) = Cargo `damagetype` for 446 weapon rows / 445 item_ids (gated on `type=weapon`, ~22× the 3.2 dict) + curated armor/fallback map (Cargo has 0 armor signal) + LLM zero-shot fallback (~$0.0002/call, cold-start only); `ItemClassifier` cached on `app.state` at lifespan (refuse-to-boot if `items.json` missing/`<100` rows); 208/208 tests green. Cargo data is gitignored → CI never boots the real lifespan (uses curated `DEFAULT_CLASSIFIER` + synthetic fixtures). **Open polish items (none blocking):** P-009 (Langfuse UI tokens 0/0), P-010 (cache compiled graph), P-012 (cap chunks_seen), P-013 (nested agent trace spans). **Next: Section 4, Phase 4.1 (auth + JWT + tenant isolation)** on `feat/14-auth`.
+**Status:** **Phase 4.1a complete (Sections 1–3 + 4.1a shipped).** Backend auth landed: `fastapi-users` (user model bound to `tenants`, no migration; **argon2id**) + **custom** access(30 min)+refresh(30 day) JWTs (`app/infra/jwt_tokens.py`, pyjwt HS256, Vault key from `app.state`); `register`/`login`/`refresh`/`logout`/`guest`; **Redis denylist** revocation keyed by `jti` (D-029, refuse-to-boot if Redis down); `/bot/ask` gated by the access-JWT dependency (refresh/denylisted/missing → 401); **RLS tenant-context mechanism built + proven** (`app/services/rls.py` `SET LOCAL`, **D-030** NULLIF fail-closed, migration `c2d3e4f5a6b7`) against real Postgres as non-superuser `terramind_app`; operator-403 dependency; `/client/token` dropped → folded into `/auth/refresh`. **236/236 tests green** (real Postgres via **testcontainers** + fakeredis — first Docker-dependent test phase). **Carried:** the RLS context is set at the first tenant-scoped op, **not** in `/bot/ask` (no tenant query there yet — approved deviation); the testcontainers/Docker **CI run must be green before the 4.1a PR merges**. **Open polish (none blocking):** P-009, P-010, P-012, P-013, **P-014** (refresh rotation + reuse detection). **Next: Phase 4.1b (RLS isolation proof + audit, the two-tenant product proof)** on `feat/16-rls-isolation`.
 
 Before suggesting any work, read these files in order:
 1. `Checklist.md` — granular phase-by-phase progress; the source of truth for *what to build next*. **You maintain this file** — update it whenever a phase starts or finishes.
@@ -61,8 +61,12 @@ Full rationale and numbers in `deliverables/DECISIONS.md`. Summary:
 | Blob storage (D-014) | **No MinIO**; raw corpus on a gitignored volume |
 | Tooling (D-015) | `uv`; ruff + format + mypy + pytest; conventional commits; one-phase-per-branch; refuse-to-boot |
 | Version targets (D-016) | Terraria version = whatever tModLoader stable supports (confirm before scraping); .NET 8 SDK |
+| Game-client auth (D-027 → P-005) | Mod login-once → discard password → persist refresh token → `/auth/refresh` → access JWT; registration portal-only |
+| Backend URL (D-028 → P-011) | Mod reads URL from config, default `http://localhost:8000`; hosting = Section 7 stretch |
+| Token model + revocation (D-029, TTLs D-006) | Custom access(30 min)+refresh(30 day) JWTs; Redis denylist keyed by `jti` (TTL = remaining life); logout/operator force-revoke; no rotation (P-014) |
+| RLS context (D-030) | `set_config(..., true)` = SET LOCAL (transaction-local); policy `NULLIF(current_setting,'')::uuid` → fail-closed; set in services/ only |
 
-**Open questions (graduate to D-NNN when settled, each with a number):** chunking (P-001), pgvector index (P-002), RAG thresholds (P-003), Redis TTL (P-004), **game-client identity (P-005)**, guardrail/red-team set (P-006), hybrid escalation (P-007), agent loop cap (P-008).
+**Open questions (graduate to D-NNN when settled, each with a number):** Redis TTL (P-004), guardrail/red-team set (P-006), hybrid escalation (P-007); polish items — Langfuse token UI (P-009), cached agent graph (P-010), chunks_seen cap (P-012), nested agent spans (P-013), refresh rotation + reuse detection (P-014). _(Graduated: P-001→D-018, P-002→D-019, P-003→D-020, P-005→D-027, P-008→D-024, P-011→D-028.)_
 
 ---
 
@@ -139,7 +143,7 @@ The full layer-by-layer rule table is in `deliverables/ARCH.md §4`.
 
 ## 7. Phase Breakdown
 
-Work is organized into **7 sections, 25 phases**, tracked granularly in `Checklist.md`. Each phase = one branch, one PR, CI green, merge, tick off.
+Work is organized into **7 sections, 27 phases** (Section 4 split into 5 phases — 4.1a/4.1b/4.2/4.3/4.4 — in Section-4 planning), tracked granularly in `Checklist.md`. Each phase = one branch, one PR, CI green, merge, tick off.
 
 - Section 1 — Foundations & Spike
 - Section 2 — Corpus & RAG
@@ -149,7 +153,7 @@ Work is organized into **7 sections, 25 phases**, tracked granularly in `Checkli
 - Section 6 — Security, Guardrails & CI
 - Section 7 — Polish & Present
 
-Branch naming: `feat/<NN>-<slug>`, e.g. `feat/01-foundations`, `feat/07-wiki-scrape`, `feat/14-auth`.
+Branch naming: `feat/<NN>-<slug>`, e.g. `feat/01-foundations`, `feat/07-wiki-scrape`, `feat/15-auth`.
 Commit style: conventional commits.
 PR template: `.github/pull_request_template.md` (added in Phase 1.1).
 

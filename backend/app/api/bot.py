@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
+from app.api.deps import require_access_token
 from app.domain.bot import BotAnswer, ChunkRef, RoutingDecision, StatePayload
 from app.infra.tracing import current_trace_var
 from app.services import agent as agent_svc
 from app.services import faq as faq_svc
 from app.services import router as router_svc
+from app.services.auth import AccessContext
 
 bot_router = APIRouter(prefix="/bot", tags=["bot"])
 
@@ -24,7 +26,11 @@ class AskResponse(BaseModel):
 
 
 @bot_router.post("/ask", response_model=AskResponse)
-async def ask(request: Request, body: AskRequest) -> AskResponse:
+async def ask(
+    request: Request,
+    body: AskRequest,
+    auth: AccessContext = Depends(require_access_token),
+) -> AskResponse:
     state = body.state or StatePayload()
 
     trace = current_trace_var.get()
@@ -32,7 +38,7 @@ async def ask(request: Request, body: AskRequest) -> AskResponse:
     if trace is not None:
         bot_span = trace.span(
             name="bot.ask",
-            input={"message": body.message},
+            input={"message": body.message, "tenant_id": str(auth.tenant_id)},
         )
 
     decision = await router_svc.classify(

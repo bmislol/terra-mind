@@ -1,6 +1,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
+from fastapi_users_db_sqlalchemy import SQLAlchemyBaseUserTableUUID
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
@@ -12,17 +13,16 @@ class Base(DeclarativeBase):
     pass
 
 
-class Tenant(Base):
+class Tenant(SQLAlchemyBaseUserTableUUID, Base):
+    # Inherits id / email / hashed_password / is_active / is_superuser /
+    # is_verified from fastapi-users (Phase 4.1a). The underlying columns
+    # already exist in the initial migration — no migration is needed; this
+    # only changes the ORM mapping. email/hashed_password are NULL in the DB
+    # for guests (is_guest=True) and set for registered players; the inherited
+    # non-optional typing reflects the player path (guests are created via a
+    # dedicated path in Phase 4.1a commit 4).
     __tablename__ = "tenants"
 
-    id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True), primary_key=True, default=uuid4
-    )
-    email: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
-    hashed_password: Mapped[str | None] = mapped_column(String, nullable=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    is_superuser: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    is_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_guest: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     guest_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

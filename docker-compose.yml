@@ -145,6 +145,8 @@ services:
         condition: service_completed_successfully
       langfuse:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "${API_PORT:-8000}:8000"
     environment:

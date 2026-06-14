@@ -135,8 +135,8 @@ This boundary is graded. Expect to be asked to add a new endpoint or agent tool 
 _Status: partial (Phase 3.2). Steps 5, 6, 7, 10–11 implemented; steps 1–4, 8–9 pending their respective phases._
 
 1. In game, the player types `/bot <question>`. The mod (`client/`) collects a **state payload** (`StatePayload`, finalized Phase 3.3): `gear` (`armor` / `accessories` / `weapon`, each an `ItemRef{item_id, name, prefix, stack}`), `inventory: list[ItemRef]`, `stats` (`PlayerStats{life, max_life, mana, max_mana, defense}`), `world` (`hardmode`, `downed_bosses: list[str]`, `biome`), and the tenant's selected `game_version`. `item_id` (= Terraria `item.type` = Cargo `itemid`) is the canonical gear key; `name` is for readability. _(Schema implemented Phase 3.3; mod producer Phase 4.2)_
-2. The mod presents its identity (see §6 / P-005) to `POST /client/token` and receives a short-lived JWT. It POSTs `{message, state}` to `POST /bot/ask` with the Bearer token. _(Phase 4.1/4.3 — design)_
-3. `app/api/bot.py` authenticates, and `services` sets the **RLS tenant context** on the session from the JWT's `tenant_id`. _(Phase 4.1 — `app/api/bot.py` exists without auth; JWT + RLS context deferred)_
+2. The mod presents its saved account token (see §6 / D-027) to `POST /client/token` and receives a short-lived JWT. It POSTs `{message, state}` to `POST /bot/ask` with the Bearer token. _(Phase 4.1a/4.3 — design)_
+3. `app/api/bot.py` authenticates, and `services` sets the **RLS tenant context** on the session from the JWT's `tenant_id`. _(Phase 4.1a — `app/api/bot.py` exists without auth; JWT + RLS context deferred)_
 4. **Guardrails input check** (`app/guardrails/`): block prompt-injection / progression jailbreaks ("give me dev items") before any LLM call. _(Phase 6.1 — design)_
 5. **Classifier router** (`app/services/router.py`): an easy FAQ ("Copper Shortsword recipe?") goes to a deterministic RAG flow; a hard, state-dependent query ("why do I keep dying to Skeletron?") goes to the agent. _(Phase 3.1 — **implemented**; single LLM call to `claude-haiku-4-5`, D-023)_
 6. **Bounded agent** (`app/agent/`, LangGraph): runs up to **MAX_ITERATIONS = 5** plan→execute cycles (D-024) over three tools — `query_wiki` (RAG, version-filtered, D-008), `analyze_loadout` (reads the state payload; hybrid Cargo `damagetype` + curated armor map + LLM zero-shot cold-start fallback per D-026, implementing D-009), `suggest_next_boss` (deterministic progression tree). The loop is `plan → (execute_tools | END)`; `execute_tools → (plan | synthesize_cap)` when the cap is hit. One iteration can dispatch multiple tools (D-024 caveat). _(Phase 3.2 — **implemented**; `app/agent/graph.py` + `app/services/agent.py`; replaces the 3.1 stub. Cost/latency profile in D-025.)_
@@ -148,17 +148,27 @@ _Status: partial (Phase 3.2). Steps 5, 6, 7, 10–11 implemented; steps 1–4, 8
 
 ## 6. Authentication, Authorization & Tenancy
 
-_Status: partial (Phase 1.6). Vault secret loading, DB session factory, ORM models, structured JSON logging, Langfuse tracing, and redaction wired. JWT/fastapi-users auth wires in Phase 4.1._
+_Status: **implemented Phase 4.1a** — register/login/refresh/logout/guest, the access+refresh token model + Redis denylist, the access-JWT gate on `/bot/ask`, and the RLS-context mechanism (built + proven). The full two-tenant product-isolation proof + auth audit events land in 4.1b._
 
-**Library:** `fastapi-users[sqlalchemy]` with `BearerTransport` + `JWTStrategy`.
+**Library:** `fastapi-users[sqlalchemy]` for the **user model + password hashing (argon2id) + register**, bound to the existing `tenants` table (no migration). Token **issuance/verification is custom** (`app/infra/jwt_tokens.py`, pyjwt HS256) because the access+refresh split needs custom claims (`tenant_id`/`role`/`jti`/`type`) + a denylist that fastapi-users' `JWTStrategy` does not model.
 
 **JWT signing key:** resolved from Vault at lifespan startup (`secrets.jwt.signing_key`, `HS256`). Read from `request.app.state` at request time — never from a module import or env var.
 
-**Tenant model:** a tenant is a **player account** (or a guest). Every player-data row carries `tenant_id`; the JWT carries it; the service layer sets it as the RLS context. The wiki corpus is **not** tenant-scoped (D-005).
+**Token model (D-029, D-006):** login returns `{access (30 min), refresh (30 day)}`. The **access** token (claims `sub`=tenant_id, `role`, `jti`, `type=access`) is the only token that authorizes resource endpoints and is the RLS-context source; the **refresh** token only mints access at `POST /auth/refresh`. Guests are access-only. Both TTLs server-pinned.
+
+**RLS context — set in services/ only (D-030, ARCH §4):** the request's service sets the tenant context with `set_config('app.current_tenant_id', <tenant_id>, true)` (`SET LOCAL`, transaction-local) **before any tenant-scoped query**; the RLS policies then filter to that tenant. The policy uses `NULLIF(current_setting(...), '')::uuid` so an uncontexted/pooled-revert connection fails **closed** (zero rows, no error). The mechanism is built and proven (`tests/services/test_rls_context.py`, non-superuser role); it is invoked at the first tenant-scoped op — **not** in `/bot/ask`, which currently runs no tenant-scoped query (`rag_chunks` is shared, D-005). `/bot/ask` is auth-gated and carries the authenticated `tenant_id`.
+
+**Tenant model:** a tenant is a **player account** (or a guest). Every player-data row carries `tenant_id`; the access JWT carries it; the service layer sets it as the RLS context. The wiki corpus is **not** tenant-scoped (D-005).
 
 **Registration:** players **self-register** through the React portal (D-011). **No email verification, no password reset** (cut — see brief; zero grading value, live-demo failure risk). **Guest mode** = an ephemeral tenant with a TTL and no persistence; erasure is a no-op for guests.
 
-**Game-client identity (OPEN — P-005):** in singleplayer there is no multiplayer server ID, so what the mod presents to `POST /client/token` is undecided. Candidates: a portal-issued account token pasted/configured into the mod, a locally generated per-install UUID bound to an account, or a Steam ID. Each has different isolation properties; resolved in the auth + client phase and promoted from P-005 to a `D-NNN`.
+**Game-client identity & mod login (D-027, resolves P-005):** the mod authenticates as a player account via **login-once / token-persist**:
+1. First launch (config-driven) takes username + password → `POST /auth/jwt/login` → the mod **discards the password immediately** (never stored).
+2. The returned **refresh** token is saved in the mod's config dir; each launch the mod exchanges it at `POST /auth/refresh` for a **short-lived access JWT** (`tenant_id` + role — the RLS-context source). Stay-logged-in across restarts. (`/client/token` was folded into `/auth/refresh`, D-027/D-029.)
+3. `/bot logout` deletes the saved token locally **and** denylists it server-side (D-029).
+Registration is **portal-only** (D-011), never via the mod. Backend URL is config-driven, default `http://localhost:8000` (D-028). The mod holds **no password and no API key** — only a revocable token; HTTPS is required for the one password transmission in any hosted deployment (SECURITY §4).
+
+**Session revocation (D-029):** logout (and operator force-revoke) adds the JWT's `jti` to a **Redis denylist** with TTL = the token's remaining lifetime. `POST /auth/logout` denylists the refresh token's `jti`; `POST /auth/refresh` and the access-token gate check the denylist before honoring a token; `audit_log` records the `session.revoked` event (durable trail). Redis is reused from the memory tier (D-010) — no new service, self-expiring entries.
 
 **Role model:** `is_superuser: bool` on `tenants`:
 
@@ -171,16 +181,18 @@ First operator is bootstrapped via a script (RUNBOOK §3).
 
 ## 7. Endpoint Inventory
 
-_Status: partial (Phase 3.1). Phase tags in Notes column._
+_Status: auth + `/bot/ask` gating landed Phase 4.1a; `/me/*`, `/versions`, `/admin/*` pending their phases. Phase tags in Notes column._
 
 | Method | Endpoint | Roles | Notes |
 |---|---|---|---|
-| `POST` | `/auth/jwt/login` | Public | fastapi-users login; returns `access_token`. _(Phase 4.1)_ |
-| `POST` | `/auth/register` | Public | Player self-registration (no email verification). _(Phase 4.1)_ |
-| `POST` | `/auth/guest` | Public | Create an ephemeral guest tenant. _(Phase 4.1)_ |
-| `POST` | `/client/token` | Player | Exchange game-client identity (P-005) for a short-lived JWT. _(Phase 4.1)_ |
+| `POST` | `/auth/register` | Public | Player self-registration (no email verification); **privilege-safe** (strips `is_superuser` — no self-elevation). Portal-only (D-011, D-027). **Implemented Phase 4.1a.** |
+| `POST` | `/auth/jwt/login` | Public | username/password → `{access_token, refresh_token}` (D-029). The mod calls this once, then discards the password (D-027). **Implemented Phase 4.1a.** |
+| `POST` | `/auth/refresh` | Public (refresh token) | Exchange a valid, non-denylisted **refresh** token for a new access token. **This is the mod's saved-token exchange** — `/client/token` was folded in here (D-027/D-029). Rejects access-type / expired / denylisted tokens (401). **Implemented Phase 4.1a.** |
+| `POST` | `/auth/logout` | Player | Denylist the **refresh** token's `jti` (D-029) + `session.revoked` audit row; the mod also deletes its saved token. **Implemented Phase 4.1a.** |
+| `POST` | `/auth/guest` | Public | Create an ephemeral guest tenant; returns an **access-only** token (no refresh — guests are ephemeral). **Implemented Phase 4.1a.** |
 | `GET` | `/healthz` | Public | Liveness probe. _(implemented Phase 1.3)_ |
-| `POST` | `/bot/ask` | Player (no auth yet) | Send `{message, state}`; returns a single JSON advice reply. **Implemented Phase 3.1** — router + FAQ path live; agent path stubbed; auth gate deferred to Phase 4.1. |
+| `POST` | `/bot/ask` | Player (**access JWT**) | Send `{message, state}`; returns a single JSON advice reply. **Gated by the access-JWT dependency Phase 4.1a** (a refresh/denylisted/missing token → 401). Router Phase 3.1, agent Phase 3.2, class detection Phase 3.3. |
+| _(dropped)_ | ~~`/client/token`~~ | — | **Removed (D-027/D-029):** the access+refresh split makes the mod's saved-token exchange identical to `/auth/refresh`; folded in there. |
 | `GET` | `/versions` | Player | List available wiki corpus versions. |
 | `GET` | `/me/preferences` | Player | Read own preferences (incl. selected version). |
 | `PATCH` | `/me/preferences` | Player | Update preferences. |
@@ -401,6 +413,6 @@ A singleplayer C# tModLoader mod. **This is the surface players actually chat th
 - **Invocation:** a `/bot` command via tModLoader's `ModCommand` (not `@bot` chat interception — no clean first-party hook).
 - **State read:** `Main.LocalPlayer` (equipped armor / accessories / held item / inventory / HP-MP) + world flags (`Main.hardMode`, `NPC.downed*`). Signatures verified against the ExampleMod repo for the targeted tModLoader version (D-016). Serializes `item.type` as the canonical `ItemRef.item_id` (== Cargo `itemid`, drives class detection via D-026); `item.Name` is sent for readability only (localization-dependent, not canonical).
 - **Transport:** async `HttpClient` — never blocks the game thread; prints `"thinking…"` via `Main.NewText`, then renders the reply.
-- **Auth:** holds no API keys; exchanges identity (P-005) for a short-lived JWT at `POST /client/token`.
+- **Auth:** holds no password and no API key; login-once then persists a revocable account token, exchanged each launch for a short-lived JWT at `POST /client/token` (D-027).
 - **No CI:** building a tModLoader mod in CI needs the tModLoader runtime/targets and is fragile for little value — a deliberate skip (documented in EVALS/RUNBOOK).
 - **Spike first:** Day-1 throwaway proves the read-state → HTTP → render round-trip before any feature work.

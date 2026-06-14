@@ -99,7 +99,7 @@ SQL
 
 ## 3. Bootstrap the First Operator
 
-_(Phase 4.1.)_ Runs host-side against `DATABASE_URL`; does not go through Vault or the API. Run once after `migrate` has exited 0.
+_(Phase 4.1a.)_ Runs host-side against `DATABASE_URL`; does not go through Vault or the API. Run once after `migrate` has exited 0.
 
 ```bash
 export DATABASE_URL="postgresql+asyncpg://terramind:terramind-dev-password@localhost:5432/terramind"
@@ -223,14 +223,26 @@ _(Filled in Phase 7.2 as a numbered click-through.)_ Target order:
 ### 7.1 Fallback if the live game demo breaks
 Use the **Streamlit admin test chat** to exercise the exact `/bot/ask` path with a hand-entered state payload — the full router → agent → RAG path runs without launching Terraria.
 
-### 7.2 Smoke test: POST /bot/ask (Phase 3.1+)
+### 7.2 Smoke test: POST /bot/ask (Phase 3.1+; auth-gated since 4.1a)
 
-Run these two commands before any demo to verify the full stack — Vault, Anthropic API key, pgvector retrieval, and Langfuse tracing — is healthy.
+Run these before any demo to verify the full stack — Vault, Anthropic key, pgvector retrieval, Langfuse tracing, **and the auth gate** — is healthy.
+
+**Get an access token first.** Since Phase 4.1a, `/bot/ask` requires a Bearer **access** token (an unauthenticated call returns 401) — register a player (or reuse one), log in, and capture the access token:
+```bash
+curl -s -X POST http://localhost:8000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email": "smoke@example.com", "password": "smoke-pw-123"}' >/dev/null
+TOKEN=$(curl -s -X POST http://localhost:8000/auth/jwt/login \
+  -d 'username=smoke@example.com&password=smoke-pw-123' \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+# Or, for a throwaway identity: TOKEN=$(curl -s -X POST .../auth/guest | jq -r .access_token)
+```
 
 **FAQ path** — should return a grounded answer with `"routing": "faq"` and a `source_chunks` entry:
 ```bash
 curl -s -X POST http://localhost:8000/bot/ask \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"message": "What damage does the Megashark do?"}' \
   | python3 -m json.tool
 ```
@@ -239,8 +251,15 @@ curl -s -X POST http://localhost:8000/bot/ask \
 ```bash
 curl -s -X POST http://localhost:8000/bot/ask \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"message": "Why do I keep dying to Skeletron?"}' \
   | python3 -m json.tool
+```
+
+**Auth gate check** — an unauthenticated call must be rejected:
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://localhost:8000/bot/ask \
+  -H "Content-Type: application/json" -d '{"message": "hi"}'   # expect 401
 ```
 
 Both traces appear in the Langfuse UI at http://localhost:3001 within a few seconds. The FAQ trace shows `bot.ask → router.classify → router.llm` and `faq.answer → rag.retrieve + faq.llm`; the agent trace shows `bot.ask → router.classify → router.llm + agent.run` (with each `chat_with_tools` generation and `rag.retrieve` span as flat siblings under `agent.run` — see P-013). **Note (P-009):** Langfuse 2.60.10 renders token counts as 0/0 in the UI; the SDK sends correct counts. Use the Anthropic console for token/cost totals (D-025).
@@ -265,6 +284,7 @@ The canonical agent-path check sends a hard, state-dependent question with a ful
 ```bash
 curl -s -X POST http://localhost:8000/bot/ask \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{
     "message": "Why do I keep dying to Skeletron?",
     "state": {
@@ -294,6 +314,7 @@ Expect `"routing": "agent"`, a class-aware progression-aware answer, and a non-e
 ```bash
 curl -s -X POST http://localhost:8000/bot/ask \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{
     "message": "What class should I build toward?",
     "state": {"game_version": "1.4.4.9", "world": {"hardmode": false}}
@@ -342,7 +363,7 @@ The throwaway spike (code in `spike/`) verified the backend↔client bridge. Fin
 - Use a single static `HttpClient` for the mod's lifetime — do not create one per call.
 
 ### Networking
-- `http://localhost:8000` is reachable from inside tModLoader (confirmed). **Open question for Phase 4 (P-011):** does the real client point at `localhost` (player runs the stack locally) or a hosted backend URL? Decide in the client phase.
+- `http://localhost:8000` is reachable from inside tModLoader (confirmed). **Resolved (D-028, was P-011):** the mod reads the backend URL from config, default `http://localhost:8000`; hosting the stack is a Section 7 stretch.
 
 ### Result
 - **Verified 2026-06-03:** in-game `/bot` round-tripped to the local echo server; reply rendered in chat with live HP. Phase 1.2 success criterion met; the project's riskiest unknown (the C#↔Python bridge) is resolved.

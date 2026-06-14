@@ -46,7 +46,9 @@ Architectural decision log for **terra-mind**. Every significant choice lives he
 **Status:** Locked (2026-06-03)
 **Choice:** Postgres Row-Level Security. Every player-data row carries `tenant_id`; the JWT sets the RLS context per request. The mod holds no API keys — it exchanges an identity for a short-lived signed JWT.
 **Why:** RLS is the enforceable isolation story (Player A can never read Player B). DB-enforced beats app-enforced for a security-graded project.
-**Number / evidence:** RLS on all tenant-scoped tables; JWT TTL `PENDING (measure)`; identity source → see P-005.
+**Number / evidence:** RLS on all tenant-scoped tables; JWT TTLs locked (D-029): **access 30 min, refresh 30 days**; identity source → P-005, resolved by D-027.
+
+**Revised 2026-06-14 (Phase 4.1a):** "JWT TTL PENDING (measure)" graduated to two **server-pinned** values (D-029): **access = 30 min**, **refresh = 30 days**. Rationale: the 30-min access token bounds the leak-damage window (a stolen access token dies within 30 min) while avoiding constant refresh on the latency-critical live-advice path; the 30-day refresh token means "stay logged in a month" and is revocable via the denylist (D-029). Both are server-set, **not** user-configurable — a TTL is a security boundary, not a preference.
 
 ### D-007 — Secrets management
 **Status:** Locked (2026-06-03)
@@ -278,6 +280,47 @@ Per-question chunk accumulation / `query_wiki` dispatches / latency: **Q05** 30/
 
 **Graduates D-009:** the live gear-read + LLM zero-shot cold-start of D-009 is now fully implemented. The trained-classifier path is **confirmed future-work-not-needed** — truthful gear read + Cargo `damagetype` + LLM zero-shot covers the four classes with no labelled dataset. The 8 `analyze_loadout` + 9 `suggest_next_boss` fixtures pass unchanged across the swap (the curated map is byte-identical to the Phase 3.2 dict).
 
+### D-027 — Game-client identity & mod login (graduates P-005)
+**Status:** Locked (2026-06-14, Section 4 planning)
+**Choice:** The singleplayer mod authenticates as a **player account via a login-once / token-persist** flow (refined Option A of P-005):
+1. **Login once.** On first launch (config-driven; an in-game UI panel is a Section 7 polish stretch) the mod takes a username + password, POSTs them to `POST /auth/jwt/login`, and **immediately discards the password** — it is never written to disk or kept in memory beyond the request.
+2. **Persist the token.** The mod saves the returned **refresh** token in its config dir (browser-cookie style). On every launch it exchanges that saved token at `POST /auth/refresh` for a **short-lived access JWT** (which carries `tenant_id` + role and is the RLS-context source, D-006/D-029). The player stays logged in across Terraria restarts with no re-typing.
+3. **Logout.** A `/bot logout` command (or config toggle) deletes the saved token locally **and** invalidates it server-side (denylist, D-029), forcing re-login on the next launch.
+4. **Registration is portal-only** (`POST /auth/register` via the React portal, D-011) — never through the mod.
+
+**Revised 2026-06-14 (Phase 4.1a):** the access+refresh split (D-029) makes the mod's "exchange saved token for a JWT" identical to refresh→access, so `/client/token` was **dropped and folded into `POST /auth/refresh`** — the mod saves the refresh token and calls `/auth/refresh`. One endpoint, one code path.
+
+**Why (security rationale):** the mod **never holds the password** (transmitted once, then discarded) **and never holds an API key** — it holds only a revocable account token that exchanges for a short-lived JWT. This avoids storing a password in a plaintext mod config (the core rationale for typed-once-then-discard). A leaked token compromises exactly one account and is rotatable from the portal / killable via D-029. The one password transmission must be over HTTPS in any hosted setup; the `localhost` default (D-028) is in-machine, so plaintext there is a non-issue (documented in SECURITY.md §4).
+**Number / evidence:** n/a (design decision). 1 password transmission per account lifetime; 0 passwords/API keys stored by the mod; 1 revocable token persisted.
+
+### D-028 — Game-client backend URL (graduates P-011)
+**Status:** Locked (2026-06-14, Section 4 planning)
+**Choice:** The mod reads the backend base URL from its config, defaulting to `http://localhost:8000`. This matches the compose-local demo target (D-002). **Hosting the stack is a Section 7 stretch only** — no Section 4 phase depends on it.
+**Why:** Confirmed reachable from inside tModLoader (spike, RUNBOOK §9). A config-driven URL makes "point at a hosted backend" a **one-line config change, not a code change** — so the default keeps the demo simple without foreclosing hosting. The hosted case is where D-027's HTTPS requirement bites; localhost does not.
+**Number / evidence:** n/a (design decision). 1 config key; default `http://localhost:8000`.
+
+### D-029 — Access+refresh token model & session revocation (Redis denylist)
+**Status:** Locked (2026-06-14, Section 4 planning); **as-shipped Phase 4.1a**.
+**Choice — token model:** every JWT (HS256, signed with the Vault key read from `app.state` at request time) carries `sub`=tenant_id (the RLS-context source), `role`, a unique `jti` (the denylist key), `type` (`access` | `refresh`), and `exp`. Two token types:
+- **Access** — 30-min TTL (D-006). The **only** token that authorizes resource endpoints (`/bot/ask` etc.). The resource dependency rejects a non-`access` token, so a refresh token can never authorize a resource call.
+- **Refresh** — 30-day TTL. Does one thing: mint a new access token at `POST /auth/refresh`. The mod persists it and exchanges it each launch (D-027). Guests get **no** refresh token (access-only; ephemeral).
+- **No rotation:** `/auth/refresh` returns a new access token but **reuses** the same refresh token until expiry or logout. Plain rotation only shortens the window while forcing the mod to re-persist every launch; reuse-*detection* (the valuable variant) is deferred as **P-014**.
+**Choice — revocation:** a **Redis denylist keyed by `jti`, TTL = the token's remaining lifetime** (self-expiring). `POST /auth/logout` denylists the **refresh** token's `jti` (the access token dies within its 30-min TTL on its own); an operator can force-revoke any token by denylisting its `jti`. `/auth/refresh` and the access-token dependency both check the denylist. The **`audit_log` (Postgres) records the `session.revoked` event** (D-017, SECURITY §6) so the durable trail lives there while the denylist stays ephemeral.
+**Why (Redis over a Postgres session table):** Redis is **already in the stack** for short-term memory (D-010) — no new service. A `jti` → TTL entry is **light and self-expiring**: it disappears exactly when the token would have expired, so the denylist never grows unbounded and needs no GC job. The only durability we need is the audit trail, which `audit_log` already provides; a second durable table would duplicate that for no isolation benefit. This makes a token demonstrably **force-revoked**, not merely expired (CLAUDE §4.3).
+**Number / evidence:** 2 token types (access 30 min / refresh 30 day); 1 Redis denylist; key = `denylist:jti:{jti}`; TTL = remaining lifetime; 0 new services. Proven in `tests/api/test_auth.py` (login pair, refresh→access, refresh rejected at resource endpoints, logout→refresh 401, denylisted access 401) — all under real Postgres + fakeredis.
+
+**Revised 2026-06-14 (Phase 4.1a):** expanded from "session revocation via Redis denylist" to the full as-shipped **access+refresh token model**. Endpoint reconciled: the mod's saved-token exchange is `POST /auth/refresh` (D-027 folded `/client/token` in). No rotation in 4.1a (P-014 logged).
+
+### D-030 — RLS context is transaction-local + fail-closed via NULLIF
+**Status:** Locked (2026-06-14, Phase 4.1a)
+**Choice:** The service layer sets the request's tenant context with `set_config('app.current_tenant_id', <tenant_id>, true)` — the **`true` third arg = `SET LOCAL`** (transaction-local). The RLS policy on `sessions`/`messages` is:
+```sql
+USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
+```
+**Why transaction-local:** a per-request setting that persisted on a **pooled** connection would leak one tenant's context into the next request on the same connection — a cross-tenant breach. `SET LOCAL` reverts at transaction end, so the context can never outlive the request. The protected queries must run in the **same transaction** as the set (no intervening commit).
+**Why NULLIF — the non-obvious gotcha (don't re-trip on this):** after a `SET LOCAL` reverts, the custom GUC `app.current_tenant_id` reads back as **`''` (empty string), NOT `NULL`**, on a pooled connection. The original policy cast `current_setting(...)::uuid` directly, which **raises** `invalid input syntax for type uuid: ""` on `''` — surfacing as a **500**, not a denial. And because connection pooling means *every request after the first reuses a previously-contexted connection*, that empty-string path is the **normal** case, not an edge case — any code path that queried without first setting the context would 500 instead of failing closed. `NULLIF(current_setting(...), '')::uuid` maps both the never-set (`NULL`) and reverted (`''`) cases to `NULL` → `tenant_id = NULL` → FALSE → **zero rows, no error**. True fail-closed.
+**Number / evidence:** proven by `tests/services/test_rls_context.py` against the real `pgvector` Postgres connected as the **non-superuser `terramind_app`** role (a superuser bypasses RLS and would prove nothing): an uncontexted connection sees **0 rows**; a row written under tenant A's context is invisible under B's and visible under A's; a cross-tenant INSERT is rejected by the implicit WITH CHECK. Migration: `c2d3e4f5a6b7_rls_policy_nullif` (recreates the policies with NULLIF; supersedes the original `a8f3b2c1d4e5` policy comment, which wrongly claimed `NULL::uuid` fail-closed).
+
 ---
 
 ## Pending Decisions
@@ -287,16 +330,17 @@ Open questions we know we must answer. Each graduates to a `D-NNN` once settled,
 | ID | Question | Decide during | Number it will be backed by |
 |---|---|---|---|
 | P-004 | Redis session TTL value | memory phase | session-length distribution / defended choice |
-| P-005 | **Singleplayer tenant identity** — what the mod exchanges for a JWT when there is no multiplayer server ID | auth + client phase | n/a (design decision; documented rationale) |
 | P-006 | Guardrail rule set, LLM-judge prompt, and red-team set composition | guardrails phase | red-team pass rate (target: 0 successful injections) |
 | P-007 | Whether to escalate to hybrid retrieval (depends on D-008) | dedicated follow-up phase after Section 3 | dense vs dense+BM25 hit@k delta (see note below) |
 | P-009 | Langfuse 2.60.10 UI does not display token usage | observability polish phase | n/a (UI bug; SDK sends correct data) |
 | P-010 | Per-request agent-graph compilation → cache compiled graph on `app.state` | agent polish phase | compile cost saved (~50 ms/call) |
-| P-011 | Game-client backend URL: `localhost` (player runs stack locally) vs hosted | auth + client phase | n/a (design decision; documented rationale) |
 | P-012 | Cap on total `chunks_seen` length to bound agent context cost | agent polish phase | max chunks / input-token ceiling |
 | P-013 | Open nested per-iteration spans inside agent graph nodes for a tighter Langfuse trace hierarchy | observability polish phase | n/a (trace-structure polish) |
+| P-014 | Refresh-token rotation + reuse detection (token-family revocation) | auth polish phase | n/a (security hardening; reuse-detection coverage) |
 
 _P-008 graduated to D-024 (Phase 3.2): tool roster finalized at 3, MAX_ITERATIONS=5._
+_P-005 graduated to D-027 (Section 4 planning): mod login-once / token-persist identity._
+_P-011 graduated to D-028 (Section 4 planning): config-driven backend URL, default localhost._
 
 **P-007 status note (Phase 2.4):** Dense-only hit@5 baseline = 0.667, below the 0.75 resolution floor (D-008). P-007 stays open. The forcing function: a dedicated follow-up phase runs the same eval harness against dense+BM25 (RRF fusion). The escalation decision rule is: **dense+BM25 must improve hit@5 by ≥ 0.05 over the dense-only baseline (i.e. hit@5 ≥ 0.717) to be adopted.** Below that delta, the added latency and complexity is not justified and dense-only stays in production. Phase 2.4 ships dense-only with the measured thresholds (D-020). The two complete misses (Q11, Q15) are caused by entity-naming gaps that BM25 also cannot fix — see EVALS.md §1.6.
 
@@ -304,11 +348,13 @@ _P-008 graduated to D-024 (Phase 3.2): tool roster finalized at 3, MAX_ITERATION
 
 **P-010 note (cached agent graph, Phase 3.2):** `app/services/agent.py` calls `build_agent_graph(...)` on every `/bot/ask` agent-path request. The compile cost is ~50 ms + transient memory; acceptable at project scale and demo load. Future optimization: build the graph once at lifespan and cache it on `app.state` — the retrieval pipeline, Anthropic client, and prompts are already process-singletons, so the graph closure is stable across requests. Not done in 3.2 to keep the service-layer contract simple and avoid premature optimization.
 
-**P-011 note (game-client backend URL, Phase 4):** In singleplayer the player may run the full stack locally (`http://localhost:8000`, confirmed reachable from inside tModLoader — RUNBOOK §9) or point the mod at a hosted backend. The choice affects the mod's default config and the backend's CORS posture. Decided in the auth + client phase. (Formerly an unregistered informal reference in RUNBOOK §9; registered here in Phase 3.2 for ID hygiene.)
+_P-011 resolved by **D-028** (Section 4 planning): config-driven backend URL, default `http://localhost:8000`; hosting is a Section 7 stretch._
 
 **P-012 note (chunks_seen length cap, Phase 3.2):** D-025 shows agent input-token cost grows roughly linear-to-quadratic with iteration count, because accumulated tool results re-enter context on each planning call. A cap on total `chunks_seen` length (or an input-token ceiling) would bound the worst case more directly than `MAX_ITERATIONS` alone (D-024). Deferred; revisit if per-call cost exceeds the D-025 p95 (~$0.020).
 
 **P-013 note (agent trace nesting, Phase 3.2):** The 3.2 agent graph does not open per-iteration spans (`agent.plan_iter_N`, `agent.tool_call`). Each `chat_with_tools` generation event and each `rag.retrieve` span are flat siblings under `agent.run`, so the Langfuse tree is flatter than a per-iteration hierarchy. Functional and correct for 3.2 (every call is still traced); future polish opens nested spans inside the `plan` / `execute_tools` nodes for tighter readability. Not a blocker for shipping 3.2.
+
+**P-014 note (refresh rotation + reuse detection, Phase 4.1a):** D-029 ships **no refresh-token rotation** — the same refresh token works until expiry or logout. Plain rotation (issue a new refresh on each use, denylist the old) only shortens the leak window while forcing the mod to re-persist its token every launch; the genuinely valuable variant is **reuse detection** — if a rotated/denylisted refresh `jti` is ever presented again, revoke the whole token family (it signals theft). That adds token-family state and is deferred. The current leak bound is the 30-min access token + explicit denylist revocation, which is sufficient for 4.1a. Revisit if a stronger refresh-theft story is wanted.
 
 ---
 
@@ -330,3 +376,10 @@ _P-008 graduated to D-024 (Phase 3.2): tool roster finalized at 3, MAX_ITERATION
 - **2026-06-12 · D-025 (new, Phase 3.2):** Agent cost/latency profile measured over 10 hard questions (scripts/measure_agent_cost.py). Total $0.07–0.09; median ~$0.005/call, p95 ~$0.020 (Q05); median latency ~7 s, p95 ~13 s. Cost computed from Anthropic console totals (66,832 in / 4,105 out) at Haiku pricing — per-trace tokens unavailable in Langfuse UI (P-009). Input-token cost grows linear-to-quadratic with iteration count (accumulated tool results inflate context).
 - **2026-06-12 · P-009/P-010/P-011/P-012/P-013 (new, Phase 3.2):** P-009 Langfuse 2.60.10 UI token-display bug (SDK sends correct data; UI shows 0/0). P-010 cache compiled agent graph on app.state (currently per-request, ~50 ms). P-011 game-client backend URL localhost vs hosted (registered from the prior informal RUNBOOK §9 reference for ID hygiene). P-012 chunks_seen length cap to bound agent context cost. P-013 open nested per-iteration spans inside agent graph nodes for a tighter Langfuse trace hierarchy.
 - **2026-06-13 · D-026 (new, Phase 3.3, graduates D-009):** Hybrid class detection — Cargo `damagetype` gated on type=weapon (A2): **446 weapon rows = 198 melee + 113 ranger + 76 magic + 59 summoner → 445 distinct item_ids, ~22× the Phase 3.2 ~20-item dict** (632 rows carry a class damagetype pre-gating; 186 tools/ammo excluded by A2) + curated armor/fallback map (Cargo has 0 armor signal, A3) + LLM zero-shot fallback (~$0.0002/call, cold-start only — new spend beyond D-025's profile). item_id-primary resolution, name fallback. CI uses the curated-only DEFAULT_CLASSIFIER + synthetic Cargo fixtures (`data/raw/` gitignored, A4); production layers Cargo at lifespan (refuse-to-boot if missing / `<100` rows). D-009 fully implemented; trained classifier confirmed not needed. 8 analyze_loadout + 9 suggest_next_boss fixtures unchanged.
+- **2026-06-14 · D-027 (new, Section 4 planning, graduates P-005):** Game-client identity = mod login-once / token-persist. Username+password once → `/auth/jwt/login` → password discarded → token saved in mod config → exchanged at `/client/token` each launch for a short-lived JWT (RLS-context source). Registration is portal-only; logout deletes + denylists the token (D-029). Mod never stores a password or API key — only a revocable token. HTTPS required for the one password transmission in any hosted setup; localhost default (D-028) is in-machine.
+- **2026-06-14 · D-028 (new, Section 4 planning, graduates P-011):** Game-client backend URL is config-driven, default `http://localhost:8000` (compose-local, D-002). Hosting is a Section 7 stretch; no Section 4 phase depends on it. Config-driven → "hosted" is a one-line change, not a code change.
+- **2026-06-14 · D-029 (new, Section 4 planning):** Session revocation via Redis denylist keyed by `jti` with TTL = token remaining lifetime. Logout/operator-revoke denylists the `jti`; `/client/token` + authed endpoints check it; `audit_log` records the event (durable trail). Redis chosen over a Postgres session table — already in the stack (D-010), self-expiring, no GC job, no new service. Enables demonstrable force-revoke, not just expiry (CLAUDE §4.3).
+- **2026-06-14 · D-006 (Phase 4.1a graduation):** JWT TTLs locked — access 30 min, refresh 30 days, server-pinned (not user-configurable). Access bounds leak-damage; refresh = stay-logged-in-a-month, revocable via denylist.
+- **2026-06-14 · D-029 (Phase 4.1a, revised in place):** Expanded to the as-shipped access+refresh token model (claims sub/role/jti/type/exp; access authorizes resources, refresh only mints access at `/auth/refresh`; guests access-only). **No rotation** (P-014). `/client/token` folded into `/auth/refresh` (D-027). Proven in tests/api/test_auth.py under real Postgres + fakeredis.
+- **2026-06-14 · D-030 (new, Phase 4.1a):** RLS context is transaction-local (`set_config(..., true)` = SET LOCAL) and fail-closed via `NULLIF(current_setting('app.current_tenant_id', true), '')::uuid`. The non-obvious gotcha: after SET LOCAL reverts on a pooled connection the GUC is `''` (not NULL), so the original `::uuid` cast threw a 500 on every uncontexted query (the normal pooled-reuse case, not an edge case) — NULLIF maps `''`→NULL→deny, no error. Proven by test_rls_context.py as non-superuser terramind_app. Migration c2d3e4f5a6b7_rls_policy_nullif.
+- **2026-06-14 · P-014 (new, Phase 4.1a):** Refresh-token rotation + reuse detection (token-family revocation) deferred — plain rotation is low value; reuse-detection adds family state. Current bound = 30-min access + denylist revocation.

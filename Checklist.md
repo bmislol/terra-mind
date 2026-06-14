@@ -159,7 +159,7 @@ Goal: a version-tagged wiki corpus in pgvector and a measured dense-retrieval ba
 
 _Phases 3.1 (router + `/bot/ask`), 3.2 (bounded LangGraph agent), and 3.3
 (finalized state schema + Cargo-aware class detection + LLM zero-shot fallback)
-all shipped. Next: Section 4, Phase 4.1 (auth + JWT + tenant isolation)._
+all shipped. Next: Section 4, Phase 4.1a (backend auth + JWT + token exchange)._
 
 Goal: the FastAPI backend produces real answers. The retrieval pipeline
 from Phase 2.4 becomes useful via a router that picks between deterministic
@@ -393,40 +393,155 @@ reality: gear weapon slot is `weapon` (not `held_item`); `downed_bosses` is
       EVALS.md §3 updated with the actual fixture coverage.
 - [x] ARCH.md §5 step 1 + §13.3: finalized `StatePayload` schema and the
       `item_id`-canonical note; class-detection refs point to D-026.
-- [x] Checklist 3.3 ticked + CLAUDE.md §2 → Section 3 complete; Phase 4.1
-      (auth & game client) next.
+- [x] Checklist 3.3 ticked + CLAUDE.md §2 → Section 3 complete; Phase 4.1a
+      (backend auth) next.
 
 ---
 
 ## Section 4 — Auth & Game Client (Days 7–9)
-> _Outline — expand when reached. Auth precedes client work (the client needs `/client/token`)._
 
-### Phase 4.1 · Auth & token exchange — `feat/14-auth`
-- Goal: fastapi-users + JWT (signing key from Vault); register/login/guest; `/client/token`; JWT sets RLS context; player/operator roles (ARCH §6).
-- **Resolve P-005** (game-client identity) here. Touches: `app/api/auth.py`, `app/infra/auth.py`, `DECISIONS`, `SECURITY.md`. Done-when: end-to-end login + a guest tenant + RLS context proven from a real JWT.
+**Sequencing principle:** the entire auth + tenant-isolation security story lands and is **proven in Python/CI (4.1a + 4.1b) before any C# is written.** The mod phases (4.2–4.4) consume an already-proven backend. Decisions resolved for this section: **D-027** (mod login-once / token-persist, resolves P-005), **D-028** (config-driven backend URL, resolves P-011), **D-029** (Redis-denylist session revocation).
 
-### Phase 4.2 · Mod core: `/bot` + state read — `feat/15-client-core`
-- Goal: `ModCommand` `/bot`; read `Main.LocalPlayer` gear/inventory + world flags; build state payload JSON.
-- Touches: `client/`. Done-when: `/bot test` logs a correct state payload in-game.
+### Phase 4.1a · Backend auth & token exchange — `feat/15-auth`
 
-### Phase 4.3 · Token exchange + transport — `feat/16-client-transport`
-- Goal: identity → `/client/token` → JWT; async `HttpClient`; render reply via `Main.NewText`.
-- Touches: `client/`. Done-when: authenticated call from the mod returns and renders.
+**Goal:** `fastapi-users` + JWT (signing key from Vault, scaffolded in 1.5); register / login / guest; `POST /client/token` (saved account token → short-lived JWT); JWT sets the RLS tenant context in the service layer; player/operator roles; the Redis denylist for logout/revocation (D-029). **Fully CI-testable; must land 100% green before any C#.**
 
-### Phase 4.4 · End-to-end — `feat/17-client-e2e`
-- Goal: in-game `/bot <question>` → router → agent/RAG → contextual reply, singleplayer.
-- Touches: `client/`, `RUNBOOK.md`. Done-when: a real progression question answered correctly in-game.
+#### Closeout
+_Shipped vs the draft: token issuance is **custom** (`app/infra/jwt_tokens.py`,
+pyjwt) — fastapi-users supplies the user model + argon2id hashing + register;
+`/client/token` was **dropped** and folded into `POST /auth/refresh` (D-027/D-029)._
+- [x] `app/infra/auth.py`: fastapi-users wiring bound to the existing `Tenant`
+      table (no migration); **argon2id** hashing; user manager + register router.
+      `app/infra/jwt_tokens.py`: custom access(30m)+refresh(30d) JWTs (HS256, Vault
+      key from `app.state`, claims `sub`/`role`/`jti`/`type`/`exp`).
+- [x] `app/api/auth.py`: `POST /auth/register` (privilege-safe — strips
+      is_superuser), `/auth/jwt/login` → `{access, refresh}`, `/auth/refresh`
+      (refresh→access; the mod's saved-token exchange), `/auth/logout`
+      (denylists the refresh `jti` + `session.revoked` audit), `/auth/guest`
+      (access-only ephemeral tenant).
+- [x] RLS context setter in **services/** (`app/services/rls.py`,
+      `set_config(..., true)` = SET LOCAL); **D-030** fail-closed NULLIF policy
+      (migration `c2d3e4f5a6b7`). Built + proven; invoked at the first
+      tenant-scoped op (not `/bot/ask`, which has none — approved commit-3
+      deviation). `terramind_app` non-superuser in tests.
+- [x] Session revocation (D-029): `app/memory/denylist.py` Redis denylist keyed
+      `denylist:jti:{jti}`, TTL = remaining lifetime; `/auth/refresh` + the
+      access-token gate check it; `session.revoked` audit row on logout.
+- [x] Roles: `require_access_token` (player) + `require_operator` (operator-403)
+      dependencies (`app/api/deps.py`). `/bot/ask` gated by the access JWT.
+- [x] Tests (CI, real Postgres via testcontainers + fakeredis, no mod):
+      register / login / refresh / logout / guest; access-token claims + 30-min
+      TTL; **refresh token rejected at `/bot/ask`** + at resource gate; denylisted
+      token → 401; operator-403 both directions; RLS proof (uncontexted → 0 rows,
+      cross-tenant invisible, WITH-CHECK block). `tests/api/test_auth.py`,
+      `tests/api/test_roles.py`, `tests/api/test_bot_ask.py`,
+      `tests/services/test_rls_context.py`. 236/236 green.
+- [x] Deliverables: D-006 TTL graduation; D-029 revised (token model, no
+      rotation/P-014); **D-030** (NULLIF fail-closed); ARCH §6/§7 (auth flow +
+      `/client/token`→`/auth/refresh`); SECURITY §3/§4/§6; P-014 registered.
+- [x] Local gate green (Docker up for testcontainers). **Done-when met:** register
+      + login + guest + a real JWT proving the RLS context mechanism — all in CI.
+      **Checklist 4.1a ticked + CLAUDE §2.** Next: Phase 4.1b on
+      `feat/16-rls-isolation`. _(Standing flag: the first Docker-dependent CI run
+      must go green before the 4.1a PR merges.)_
+
+### Phase 4.1b · RLS isolation proof + audit — `feat/16-rls-isolation`
+
+**Goal:** prove **"tenant isolation is the security story" (CLAUDE §4.3) in Python, before the mod exists.** Two-tenant isolation demonstrated end-to-end through the real API + RLS; erasure scoped to one tenant; audit rows for auth/erasure events. This is the phase that locks the headline control in CI; Phase 7.1 later *re-demos* it live.
+
+#### Closeout
+- [ ] `tests/test_rls_isolation.py`: create two tenants (A, B), write `/bot`
+      session/message rows under each, and assert through the **real API + RLS**
+      that A cannot read or write B's rows (cross-tenant read returns nothing;
+      cross-tenant write is rejected). No application `WHERE` — Postgres enforces.
+- [ ] `DELETE /me` (right-to-erasure) scoped to the caller's tenant only: purges
+      that tenant's Postgres rows + Redis session, leaves the other tenant intact;
+      writes a `tenant.erased` audit row. (Full erasure UX is Phase 6.2; here it
+      is the isolation-scoped proof.)
+- [ ] Audit rows for auth events (`auth.login`, `session.revoked`, `tenant.erased`)
+      written and readable only by an operator (`GET /admin/audit-log`).
+- [ ] Denylist check wired into the authed request path (a revoked token cannot
+      reach any tenant-scoped handler).
+- [ ] EVALS.md: register the isolation test as a **CI gate** (cross-tenant read
+      must return nothing for a green build). SECURITY.md §3 updated to "proven
+      in 4.1b, re-demoed in 7.1".
+- [ ] Local gate green; **Checklist 4.1b ticked + CLAUDE §2.** Security story
+      locked in CI before any C#.
+
+### Phase 4.2 · Mod core: `/bot` command + state read — `feat/17-client-core`
+
+**Goal:** the tModLoader `ModCommand` `/bot`; read `Main.LocalPlayer` gear/inventory + world flags; build the **finalized Phase 3.3 `StatePayload` JSON** (item_id primary, prefix/stack, `PlayerStats`, inventory, world). **Not CI-testable** (ARCH §13.3 "No CI" for the mod) — ticks on **manual** verification.
+
+#### Closeout
+- [ ] `client/`: `ModCommand` with `CommandType.Chat`, `Command => "bot"`,
+      invoked in-game as `/bot <message>` (spike §findings).
+- [ ] State read: `player.armor[]` / `inventory[]` / `HeldItem` → `ItemRef`
+      (`item.type` → `item_id`, `item.prefix` → `prefix`, `item.stack` → `stack`,
+      `item.Name` → `name`); `statLife`/`statMana`/`statDefense` → `PlayerStats`;
+      `Main.hardMode` + `NPC.downed*` → `WorldState` (`downed_bosses: list[str]`);
+      biome → `WorldState.biome`.
+- [ ] Serialize to the exact Phase 3.3 `StatePayload` JSON shape (D-026 schema);
+      `game_version` from config.
+- [ ] **Manual done-when (human runs Terraria):** `/bot test` logs a correct
+      `StatePayload` JSON in-game; verified **by eye** against a known character
+      (e.g. a Ranger in Fossil armor holding a Megashark serializes the right
+      item_ids, hardmode flag, and downed-boss list). Screenshot/log captured in
+      the PR. **This phase ticks on manual verification, not CI green.**
+- [ ] RUNBOOK: note the manual verification step + how to read the logged payload.
+
+### Phase 4.3 · Mod login + token persistence + transport — `feat/18-client-transport`
+
+**Goal:** config-driven login (D-027): username/password once → `/auth/jwt/login` → discard password → save token; each launch exchange token at `/client/token` → short-lived JWT; `/bot logout` deletes local token + calls `/auth/logout`; async `HttpClient` (single static instance, spike §findings); render reply via `Main.NewText` with `QueueMainThreadAction` marshaling. **Not CI-testable** — manual done-when. Resolves P-005's client half.
+
+#### Closeout
+- [ ] Config-driven first-launch login: read username/password from mod config,
+      `POST /auth/jwt/login`, **discard the password immediately** (never persist).
+      Backend URL from config, default `http://localhost:8000` (D-028).
+- [ ] Token persistence: save the returned token in the mod config dir; on each
+      launch exchange it at `POST /client/token` for a short-lived JWT. Stay
+      logged in across restarts (no re-typing).
+- [ ] `/bot logout`: delete the saved token locally **and** `POST /auth/logout`
+      (server denylist, D-029) → forces re-login next launch.
+- [ ] Transport: a single static `HttpClient` for the mod lifetime; fire-and-
+      forget the call with a synchronous "thinking…" first; **marshal every
+      `Main.*` UI call back via `QueueMainThreadAction`** (spike §critical).
+      Send `{message, state}` with the Bearer JWT.
+- [ ] **Manual done-when (human runs Terraria):** an authenticated `/bot` call
+      from the mod returns and renders in-game; the token **survives a Terraria
+      restart** (stay-logged-in proven); `/bot logout` forces re-login on the next
+      launch (saved token gone + server rejects the old `jti`). **Ticks on manual
+      verification, not CI.**
+- [ ] RUNBOOK + SECURITY.md: document the login/logout flow + password-never-stored.
+
+### Phase 4.4 · End-to-end in-game — `feat/19-client-e2e`
+
+**Goal:** in-game `/bot <question>` → router → agent/RAG → contextual, progression-aware reply, singleplayer, full real flow. **Not CI-testable** — manual done-when. This is the Section-4 payoff: the production chat surface working end to end.
+
+#### Closeout
+- [ ] Full path live: `/bot <question>` from inside Terraria → JWT-authed
+      `/bot/ask` → router → agent (tools incl. Cargo class detection) / RAG →
+      single JSON reply rendered via `Main.NewText`.
+- [ ] State-dependent correctness: the answer reflects the **live character
+      state** (class from real equipped gear, progression from real downed-boss
+      flags) — not a generic answer.
+- [ ] **Manual done-when (human runs Terraria):** a real progression question —
+      e.g. `/bot why do I keep dying to Skeletron` on a pre-Hardmode character —
+      is answered **correctly and progression-aware in-game**, end to end, with
+      live state. The full smoke flow (FAQ + agent + cold-start) works from the
+      mod. Recorded for the demo. **Ticks on manual verification, not CI.**
+- [ ] RUNBOOK §demo: the in-game click-through (launch → `/bot` → answer) added
+      to the demo flow.
 
 ---
 
 ## Section 5 — Web Surfaces (Days 9–11)
 > _Outline — expand when reached. Keep the portal minimal (D-011)._
 
-### Phase 5.1 · React config portal — `feat/18-frontend-user`
+### Phase 5.1 · React config portal — `feat/20-frontend-user`
 - Goal: login/register/guest, version dropdown + check, preferences, right-to-erasure button. No chat.
 - Touches: `frontend-user/`, `ARCH.md §13.2`. Done-when: a player can register, pick a version, set prefs, request erasure.
 
-### Phase 5.2 · Streamlit admin — `feat/19-frontend-admin`
+### Phase 5.2 · Streamlit admin — `feat/21-frontend-admin`
 - Goal: operator login, corpus/version mgmt + re-rag trigger, tenant view, test chat over `/bot/ask`.
 - Touches: `frontend-admin/`, `ARCH.md §13.1`. Done-when: full agent path demoable without launching Terraria.
 
@@ -435,15 +550,15 @@ reality: gear weapon slot is `weapon` (not `held_item`); `downed_bosses` is
 ## Section 6 — Security, Guardrails & CI (Days 11–12)
 > _Outline — expand when reached._
 
-### Phase 6.1 · Guardrails + red-team — `feat/20-guardrails`
+### Phase 6.1 · Guardrails + red-team — `feat/22-guardrails`
 - Goal: input/output filter (deterministic + LLM-judge) vs injection / "give me dev items" / toxicity; red-team set (graduate P-006).
 - Touches: `app/guardrails/`, `data/eval/`, `SECURITY.md`. Done-when: red-team set passes (0 successful injections).
 
-### Phase 6.2 · Right-to-erasure end-to-end — `feat/21-erasure`
+### Phase 6.2 · Right-to-erasure end-to-end — `feat/23-erasure`
 - Goal: `DELETE /me` purges Postgres rows + Redis session; audit-logged.
 - Touches: `app/api`, `app/services`, `SECURITY.md`. Done-when: erasure verified empty + audit row written.
 
-### Phase 6.3 · CI eval gates green — `feat/22-ci-eval-gates`
+### Phase 6.3 · CI eval gates green — `feat/24-ci-eval-gates`
 - Goal: `eval-redteam.yml` (PR-triggered, no DB) red on injection success; `eval-rag.yml` thresholds enforced; both green on `main`.
 - Touches: `.github/workflows/`, `EVALS.md`. Done-when: a regression turns CI red on purpose, then green when fixed.
 
@@ -452,15 +567,15 @@ reality: gear weapon slot is `weapon` (not `held_item`); `downed_bosses` is
 ## Section 7 — Polish & Present (Days 13–14)
 > _Outline — expand when reached._
 
-### Phase 7.1 · Isolation demo — `feat/23-isolation-demo`
-- Goal: a second tenant to *prove* RLS isolation live (not just assert it).
-- Done-when: Tenant A query can't surface Tenant B data, shown end-to-end.
+### Phase 7.1 · Isolation **re-demo** (live) — `feat/25-isolation-demo`
+- Goal: live re-demonstration of the isolation **already proven in CI at Phase 4.1b** — a second tenant shown end-to-end so the defense sees it, not first proof.
+- Done-when: Tenant A query can't surface Tenant B data, shown live end-to-end (the `tests/test_rls_isolation.py` gate from 4.1b is the proof; this is the visual demo of it).
 
-### Phase 7.2 · Deliverables finalize + README — `feat/24-runbook-deliverables`
+### Phase 7.2 · Deliverables finalize + README — `feat/26-runbook-deliverables`
 - Goal: `RUNBOOK.md §demo` numbered click-through; finalize `EVALS/SECURITY/LICENSES`; real `README.md`.
 - Done-when: a cold reader can boot and run the demo from the docs alone.
 
-### Phase 7.3 · Demo prep + buffer — `feat/25-demo-prep`
+### Phase 7.3 · Demo prep + buffer — `feat/27-demo-prep`
 - Goal: rehearse the demo; record; absorb slippage.
 - Done-when: clean run-through within time; buffer consumed by overflow from earlier phases.
 
