@@ -367,3 +367,58 @@ The throwaway spike (code in `spike/`) verified the backend↔client bridge. Fin
 
 ### Result
 - **Verified 2026-06-03:** in-game `/bot` round-tripped to the local echo server; reply rendered in chat with live HP. Phase 1.2 success criterion met; the project's riskiest unknown (the C#↔Python bridge) is resolved.
+
+## 10. Game Client Mod — build & verify (Phase 4.2+)
+
+The mod source is version-controlled in `client/TerraMind/`. It has **no CI** (building a tModLoader mod needs the tModLoader runtime/targets — a deliberate skip, ARCH §13.3); "done" is the **manual** check below. Phase 4.2 reads live character state and logs the `StatePayload` JSON — **no backend call yet** (that's 4.3).
+
+### Build
+tModLoader mods build inside `<tModLoader>/ModSources/<ModName>/` (the csproj imports `..\tModLoader.targets`, which only exists there). So:
+
+```bash
+# Copy (or symlink) the source into tModLoader's ModSources. Path varies by install;
+# on native-Steam Linux it's typically ~/.local/share/Terraria/tModLoader/ModSources/
+cp -r client/TerraMind "<tModLoader>/ModSources/TerraMind"
+#   …or symlink so edits track the repo:
+# ln -s "$(pwd)/client/TerraMind" "<tModLoader>/ModSources/TerraMind"
+```
+Then in tModLoader: **Workshop → Develop Mods → TerraMind → Build + Reload**. (If the SDK isn't found, see §9 — use native Steam + the apt .NET 8 SDK, not Snap.) A localization-missing warning is harmless; it still builds.
+
+### Run
+1. Enable **TerraMind** in Mods, launch **Singleplayer** with any character/world.
+2. Open the chat box and type **`/bot test`** (in 4.2 any `/bot <message>` dumps state; the message is captured but not sent).
+3. Chat shows a one-line summary; the **full JSON is in the log**.
+
+### Where the output is
+The full `StatePayload` JSON is written via the mod logger to tModLoader's **`client.log`** (e.g. `<tModLoader>/tModLoader-Logs/client.log`, or the install's logs dir), tagged `/bot message=…  StatePayload:`. Chat lines truncate long JSON, so **the log is the source of truth**.
+
+### What CORRECT output looks like (eyeball against your character)
+```json
+{
+  "game_version": "1.4.4.9",
+  "gear": {
+    "armor": [
+      {"item_id": 1281, "name": "Fossil Helmet", "prefix": null, "stack": 1},
+      {"item_id": 1282, "name": "Fossil Plate", "prefix": null, "stack": 1},
+      {"item_id": 1283, "name": "Fossil Greaves", "prefix": null, "stack": 1}
+    ],
+    "accessories": [
+      {"item_id": 54, "name": "Hermes Boots", "prefix": "Quick", "stack": 1}
+    ],
+    "weapon": {"item_id": 98, "name": "Minishark", "prefix": "Unreal", "stack": 1}
+  },
+  "inventory": [
+    {"item_id": 40, "name": "Wooden Arrow", "prefix": null, "stack": 250}
+  ],
+  "stats": {"life": 300, "max_life": 300, "mana": 60, "max_mana": 60, "defense": 14},
+  "world": {"hardmode": false, "downed_bosses": ["Eye of Cthulhu", "Eater of Worlds"], "biome": "forest"}
+}
+```
+(IDs/names illustrative.) **Done-when:** the JSON matches your real character — right `gear.armor`/`weapon`, right `downed_bosses`, correct `hardmode`, sane `stats` — and field names are exactly snake_case as above. This is the gate (no CI).
+
+### Scrutinise these (most likely wrong, since the C# is unrun here)
+- **Boss flag names** (`BossFlags.cs`) — esp. the **extended set** (`downedQueenSlime`/`downedEmpressOfLight`/`downedDeerclops`); a wrong static-field name is a **compiler error** (report the text). Confirm a **crimson** world reports "Brain of Cthulhu".
+- **`max_life`/`max_mana`** — should be the character's **effective max** (`statLifeMax2`/`statManaMax2`), not 100/20.
+- **Armor vs accessories** — `armor[0..2]` = the 3 armor pieces, `armor[3..9]` = accessories (not vanity/social).
+- **`prefix`** — should be a name like "Unreal"/"Legendary" (via `Lang.prefix`), `null` if unmodified — not a number/garbage.
+- **`biome`** — sensible for your zone, or `"forest"` default.

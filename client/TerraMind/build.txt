@@ -1,0 +1,3 @@
+displayName = TerraMind
+author = bmislol
+version = 0.1

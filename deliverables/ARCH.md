@@ -408,11 +408,18 @@ Auth: Bearer JWT from `/auth/jwt/login` or `/auth/guest`, stored client-side.
 
 ### 13.3 Game Client (`client/`) — production chat surface
 
-A singleplayer C# tModLoader mod. **This is the surface players actually chat through.**
+A singleplayer C# tModLoader mod (.NET 8, tModLoader v2026.4.3.0 / Terraria 1.4.4.9 — D-016). **This is the surface players actually chat through.**
 
-- **Invocation:** a `/bot` command via tModLoader's `ModCommand` (not `@bot` chat interception — no clean first-party hook).
-- **State read:** `Main.LocalPlayer` (equipped armor / accessories / held item / inventory / HP-MP) + world flags (`Main.hardMode`, `NPC.downed*`). Signatures verified against the ExampleMod repo for the targeted tModLoader version (D-016). Serializes `item.type` as the canonical `ItemRef.item_id` (== Cargo `itemid`, drives class detection via D-026); `item.Name` is sent for readability only (localization-dependent, not canonical).
-- **Transport:** async `HttpClient` — never blocks the game thread; prints `"thinking…"` via `Main.NewText`, then renders the reply.
-- **Auth:** holds no password and no API key; login-once then persists a revocable account token, exchanged each launch for a short-lived JWT at `POST /client/token` (D-027).
-- **No CI:** building a tModLoader mod in CI needs the tModLoader runtime/targets and is fragile for little value — a deliberate skip (documented in EVALS/RUNBOOK).
-- **Spike first:** Day-1 throwaway proves the read-state → HTTP → render round-trip before any feature work.
+**Structure (`client/TerraMind/`, fresh build — the Phase 1.2 spike was throwaway):**
+- `TerraMind.cs` (Mod class), `build.txt`, `TerraMind.csproj` (imports `..\tModLoader.targets`; `<Nullable>enable</Nullable>`).
+- `Commands/BotCommand.cs` — the `/bot` `ModCommand`.
+- `State/StateDtos.cs` — `StatePayloadDto` etc. with explicit `[JsonPropertyName]` (snake_case) matching the backend Pydantic schema exactly.
+- `State/StateReader.cs` — reads `Main.LocalPlayer` → DTO; `State/BossFlags.cs` — `NPC.downed*` → canonical boss names.
+- Builds inside `<tModLoader>/ModSources/TerraMind/` (RUNBOOK §10).
+
+- **Invocation:** a `/bot` command via tModLoader's `ModCommand` (`CommandType.Chat`; not `@bot` chat interception — no clean first-party hook).
+- **State read (implemented Phase 4.2):** `Main.LocalPlayer` — `armor[0..2]`→`gear.armor`, `armor[3..9]`→`gear.accessories`, `HeldItem`→`gear.weapon`, `inventory[0..49]`→`inventory`, `statLife`/`statLifeMax2`/`statMana`/`statManaMax2`/`statDefense`→`stats` — plus world flags (`Main.hardMode`, `NPC.downed*`, `WorldGen.crimson` for the EoW/BoC split, `Player.Zone*`→biome). Serializes `item.type` as the canonical `ItemRef.item_id` (== Cargo `itemid`, drives class detection via D-026); `item.Name`/`Lang.prefix[..]` are sent for readability (localization-dependent, not canonical). Boss-name strings are chosen to normalize to the tokens the backend's `_normalize`/`suggest_next_boss` check.
+- **Transport (Phase 4.3):** async `HttpClient` — never blocks the game thread; prints `"thinking…"` via `Main.NewText`, then renders the reply. The `QueueMainThreadAction` marshal helper is in place from 4.2 (a post-`await` `Main.*` call must be marshaled — the spike's critical finding).
+- **Auth (Phase 4.3):** holds no password and no API key; login-once then persists a revocable **refresh** token, exchanged each launch for a short-lived access JWT at `POST /auth/refresh` (D-027; `/client/token` folded in).
+- **No CI:** building a tModLoader mod in CI needs the tModLoader runtime/targets and is fragile for little value — a deliberate skip. **Verification is manual, in-game** (RUNBOOK §10): `/bot test` logs the `StatePayload` JSON to `client.log`, eyeballed against the real character. Phase 4.2 verified across 7 runs.
+- **Spike first:** Day-1 throwaway proved the read-state → HTTP → render round-trip before any feature work.
