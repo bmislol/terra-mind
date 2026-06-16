@@ -589,15 +589,37 @@ not CI** (ARCH §13.3) — 7 `/bot test` runs against a live character via
 ---
 
 ## Section 5 — Web Surfaces (Days 9–11)
-> _Outline — expand when reached. Keep the portal minimal (D-011)._
+
+Goal: the two web surfaces over the proven backend — the React **config** portal (player account management, NOT chat — D-011) and the Streamlit operator/test bench (corpus/version admin + the test chat that's the demo fallback if the live game breaks, RUNBOOK §7.1). Both are mostly FRONTEND WIRING to already-built, CI-green endpoints from Section 4 — the main risks are CORS, browser token handling, and admin endpoints that may not exist yet (audit first).
+
+> **D-011 revised (Section 5):** the React portal is upgraded from "minimal forms, may degrade to Streamlit" to a **polished** demo surface — conscious override, scope cost accepted, logged in DECISIONS. Guardrail: polished means clean/consistent/presentable, NOT a CSS rabbit-hole. Timebox the styling; if it starts eating Section-6 time, stop at "presentable." The grade is in Sections 6-7 (the evals), not the portal's pixels.
 
 ### Phase 5.1 · React config portal — `feat/20-frontend-user`
-- Goal: login/register/guest, version dropdown + check, preferences, right-to-erasure button. No chat.
-- Touches: `frontend-user/`, `ARCH.md §13.2`. Done-when: a player can register, pick a version, set prefs, request erasure.
+Player-facing CONFIG surface (D-011). No chat. Vite + React. Polished (D-011 revision). Wires endpoints already built + CI-green in Section 4.
 
-### Phase 5.2 · Streamlit admin — `feat/21-frontend-admin`
-- Goal: operator login, corpus/version mgmt + re-rag trigger, tenant view, test chat over `/bot/ask`.
-- Touches: `frontend-admin/`, `ARCH.md §13.1`. Done-when: full agent path demoable without launching Terraria.
+- [ ] **Endpoint reality check first:** confirm the endpoints the portal needs exist + their exact request/response shapes — `/auth/register`, `/auth/jwt/login`, `/auth/guest`, `/versions`, `/me/preferences` (GET+PATCH), `DELETE /me`. Read the routers, don't assume from ARCH §7.
+- [ ] **CORS:** confirm the API allows the portal origin (localhost:5173). If CORS middleware isn't configured for it, add it (backend change, CI-tested) — this is the #1 thing that silently breaks browser→API.
+- [ ] `frontend-user/` scaffold: Vite + React, single bundle, the 3 deps in LICENSES.md (react, react-dom, vite) — justify any addition.
+- [ ] **Auth:** login / register / continue-as-guest; store the JWT client-side (the access+refresh pair from D-006/D-029); attach the Bearer token to authed calls; handle 401 (expired) → refresh or re-login. NO password persistence.
+- [ ] **Version:** dropdown of `/versions`; "check for new version" (operator-only endpoint — portal shows the player's selectable list).
+- [ ] **Preferences:** read (GET `/me/preferences`) + update (PATCH), incl. selected version; reflect saved state.
+- [ ] **Account / erasure:** `DELETE /me` button with a confirm step (it's destructive — data erasure, D-032); show success/empty state.
+- [ ] **Polish (timeboxed):** consistent layout, labeled forms, loading states, readable errors (not raw JSON), basic responsive. STOP at clean — no animation/design rabbit-hole. NO browser localStorage for anything but the token, and even that per the auth design.
+- [ ] **Compose:** `frontend-user` service serves the built bundle (nginx or vite preview); `docker compose up` → portal on :5173; `/healthz`-equivalent or root loads.
+- [ ] **Manual verify (the done-when):** register a new player → pick a version → set prefs (persist across reload) → request erasure (data gone). Guest path: continue-as-guest → limited session. Capture the flow (screenshots) for the PR.
+- [ ] CI green (lint/build for the frontend if wired; backend CI for any CORS change). `ARCH.md §13.2`, `LICENSES.md §6` (confirm JS deps), D-011 revision in `DECISIONS.md`. Tick 5.1.
+
+### Phase 5.2 · Streamlit operator/test bench — `feat/21-frontend-admin`
+Operator surface + THE DEMO FALLBACK (RUNBOOK §7.1). Full-parity test chat is the priority (exercises the exact /bot/ask path without Terraria).
+
+- [ ] **Admin-endpoint AUDIT first (your call):** check which `/admin/*` actually exist + are tested — `/admin/versions/check`, `/admin/rerag`, `/admin/tenants`, `/admin/audit-log`. Scope the admin UI to what's REAL; flag any missing as explicit deferrals (don't build UI against a 404, don't silently build the missing endpoints — log the gap and decide per-endpoint).
+- [ ] **Operator login:** Streamlit page → `/auth/jwt/login`; gate the admin pages behind an operator (is_superuser) token; non-operator → blocked. (First operator bootstrapped via RUNBOOK §3 script.)
+- [ ] **TEST CHAT (priority — the demo fallback):** hand-enter (or pick a preset) a StatePayload + a question → POST `/bot/ask` → render the answer + show the routing (faq/agent) + session_id. This exercises the FULL pipeline (router → agent/RAG → response) WITHOUT Terraria. Include a couple of preset payloads (e.g. a melee pre-boss, a ranger loadout) so the demo is one click. May stream for dev convenience (ARCH §13.1). This is what you fall back to if the game won't launch.
+- [ ] **Corpus & Versions** (scoped to audited endpoints): list stored versions + manifest counts; "check for new version"; trigger re-rag (if `/admin/rerag` exists — else deferred, the SCRIPT is the must-have per ARCH §10).
+- [ ] **Tenants / audit:** read-only tenant list (`/admin/tenants`) + audit-log view (`/admin/audit-log`) — if they exist; else flag.
+- [ ] **Compose:** `frontend-admin` service on :8501; `docker compose up` → admin loads.
+- [ ] **Manual verify (the done-when):** operator login → test chat with a preset payload → full agent answer renders with routing shown (the whole path, no game). Corpus/tenant views load for what's built. Capture for the PR + as a demo-fallback artifact.
+- [ ] CI green. `ARCH.md §13.1`, RUNBOOK §7.1 (the fallback procedure) + §3 (operator bootstrap). Tick 5.2.
 
 ---
 
