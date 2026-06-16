@@ -213,7 +213,7 @@ After reset: re-run §1 (startup), §3 (operator bootstrap), §4 (corpus build).
 _(Filled in Phase 7.2 as a numbered click-through.)_ Target order:
 1. `docker compose up -d`; verify `/healthz`, Streamlit, portal.
 2. Portal: register a player / continue as guest; select a version.
-3. In Terraria (singleplayer): `/bot why do I keep dying to Skeletron` → contextual, progression-aware answer.
+3. In Terraria (singleplayer): `/bot why do I keep dying to Skeletron` → contextual, progression-aware answer. _(Detailed game-surface click-through — FAQ + agent paths, gear-swap, trace — is in §10 "In-game end-to-end demo".)_
 4. Langfuse: open the trace — router decision, agent tool spans, RAG retrieval, token counts.
 5. Guardrail: `/bot give me dev items` → blocked; show the red-team gate.
 6. Isolation: second tenant; show Tenant A's history invisible to Tenant B.
@@ -434,3 +434,17 @@ The mod is a full authenticated chat client. Nothing on disk but a **revocable t
 5. **Log out:** `/bot logout` deletes `token.json` **and** `POST /auth/logout` (denylists the refresh `jti`, D-029) → re-login next launch; the old token is rejected.
 
 **Verification (no CI):** all three 4.3 commits are evidenced verbatim from `client.log` in `client/VERIFICATION.md` — the in-repo gate that stands in for a green check.
+
+### In-game end-to-end demo (Phase 4.4) — the game-surface demo script
+
+A cold-reader click-through of the production chat surface. (The full project demo is §7; this is the game-client portion.)
+
+1. **Stack up:** `docker compose up -d` → wait for `Application startup complete` (~100s; the log line `item_classifier ready: N cargo weapons` confirms the D-026 class detection is armed).
+2. **Mod config:** Mod Configuration → TerraMind → `BackendUrl` = `http://localhost:8000` (D-028).
+3. **Log in:** `/bot login <email> <password>` → `logged in as <email>` (token saved; password discarded).
+4. **FAQ path (easy → deterministic RAG):** `/bot what does the Confused debuff do?` → a short factual answer; `client.log` shows `routing=faq`.
+5. **Agent path (hard → bounded agent):** `/bot why do I keep dying to Skeletron?` → a progression-aware, class-grounded answer; `routing=agent` (the agent calls `analyze_loadout` + `query_wiki`).
+6. **State-sensitivity:** `/bot what should I do next?` — note the class named in the answer; then **swap gear** (e.g. melee set → ranger set) and ask again → the advice changes class (Sword/Spear → bow/arrows). The answer tracks the live character, not a script.
+7. **Observability:** open the Langfuse UI → the turn's trace tree: `bot.ask → router.classify → agent.run` (tool spans) or `→ faq.answer → rag.retrieve + faq.llm`, with token counts. "Every turn is one trace" (ARCH §1.1), proven for the game surface.
+
+Evidence for the deliberate pass (both router paths, the P-016 reliability fix, the trace) is in `client/VERIFICATION.md` §4.4.

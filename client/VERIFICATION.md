@@ -139,3 +139,69 @@ answer: Good news—as a Ranger in the pre-boss stage, you're well-suited for th
 - **Build clean** — the rebuild (23:11:51) reported **0 errors and 0 warnings**; `grep -c "warning CS"` over the log = 0. The nullable fix is confirmed effective.
 
 **Confirmed by the operator (chat-only / filesystem, not in log):** the world-entry `session restored — logged in` confirmation showed; `/bot` after logout returned `not logged in — use /bot login`; `ls token.json` → *No such file or directory*.
+
+---
+
+## Phase 4.4 — end-to-end in-game (router both paths, P-016 fix, observability)
+
+**What it proves:** the production chat surface works end to end as designed —
+in-game `/bot` → JWT-authed `/bot/ask` → router → agent (Cargo class detection +
+RAG) → contextual reply; **both** router branches fire from in-game; the agent now
+grounds **reliably** in live state (P-016); and an in-game turn produces a clean
+backend Langfuse trace.
+
+### Router — both paths fire from in-game
+- **agent** path — verbatim below (`routing=agent` on every progression turn).
+- **faq** path — `/bot what does the Confused debuff do?` → `routing=faq`,
+  `faq.answer → rag.retrieve + faq.llm` in Langfuse. *(Operator-confirmed this
+  session; the verbatim mod-log line was in a now-rotated baseline session, so it
+  isn't re-quoted here — re-runnable on demand.)*
+
+### P-016 — intermittent grounding → reliable (the one contained fix)
+**Before** (4.3 + baseline): the same "what should I do next?" grounded *sometimes*
+and asked "what's your situation?" other times — the agent LLM only sees the state
+if it chooses to call `analyze_loadout`/`suggest_next_boss`, and the prompt framed
+those calls conditionally.
+**Fix:** one grounding instruction added to `app/prompts/agent_system.md` — the
+live state is available every turn via the tools; call them first; never ask the
+player for state you can look up. (Not raw-state injection, which would undercut
+the truthful Cargo class detection, D-026.)
+**After** (verbatim, 2026-06-16 19:55–19:58 — same question 5×, gear swapped):
+
+```
+[19:55:34] /bot ask ok: routing=agent session_id=bf23fa2b…
+answer: You're a **melee player in pre-boss progression**. … craft **silver or tungsten armor** … craft a **melee weapon** like a Sword or Spear …
+[19:55:50] /bot ask ok: routing=agent …
+answer: You're playing as a **melee character in pre-boss progression**. … Craft a wooden sword …
+[19:56:48] /bot ask ok: routing=agent …
+answer: You're in **pre-boss melee mode** … a Silver or Tungsten **sword** …
+— gear swapped: melee → ranger —
+[19:57:58] /bot ask ok: routing=agent …
+answer: You're a **Ranger in the pre-boss stage** … crafting **ranged armor** … a good **bow and arrows** … gathering **ammunition** …
+[19:58:18] /bot ask ok: routing=agent …
+answer: You're a **Ranger in pre-boss progression** … a **wooden bow** or better, then gather some **arrows** …
+```
+
+**Result: ✅ P-016 fixed (reliable grounding).**
+- **Reliability:** 3/3 melee runs grounded (named class + pre-boss stage + class-
+  appropriate next step), **none** asked for context. The intermittency is gone.
+- **State-sensitivity:** same question + same progression stage, **different**
+  class-appropriate advice — melee → *Sword / Spear / wooden sword*; ranger →
+  *bow / arrows / ammunition / ranged armor*. The live state drives the answer, it
+  doesn't just ride along.
+- **Honest measurement boundary:** this is in-game n≈5, reliable here. Whether the
+  instruction helps or regresses **across many questions / the FAQ path** is for
+  Section 6's eval harness + golden set — recorded in P-016 / DECISIONS.
+
+### Observability — the in-game turn is one clean backend trace
+Operator-confirmed in Langfuse: `bot.ask → router.classify → agent.run` (with
+`analyze_loadout` firing — the tool behind the grounding) / `faq.answer →
+rag.retrieve + faq.llm`, **with real token counts** (the 2.60.10 UI shows populated
+tokens on this path, not the P-009 zeros). Closes "traces are real" for the game
+surface, not just curl / Streamlit.
+
+### Incidental — refresh survives a backend redeploy
+The api was rebuilt mid-session (to load the P-016 fix); on the next world entry the
+mod's `/auth/refresh on launch` succeeded against the fresh backend (same Vault
+signing key) → `session restored` with no re-login. The 4.3 token flow holds across
+an api redeploy.

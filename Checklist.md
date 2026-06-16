@@ -564,19 +564,27 @@ not CI** (ARCH §13.3) — 7 `/bot test` runs against a live character via
 **Goal:** in-game `/bot <question>` → router → agent/RAG → contextual, progression-aware reply, singleplayer, full real flow. **Not CI-testable** — manual done-when. This is the Section-4 payoff: the production chat surface working end to end.
 
 #### Closeout
-- [ ] Full path live: `/bot <question>` from inside Terraria → JWT-authed
-      `/bot/ask` → router → agent (tools incl. Cargo class detection) / RAG →
-      single JSON reply rendered via `Main.NewText`.
-- [ ] State-dependent correctness: the answer reflects the **live character
-      state** (class from real equipped gear, progression from real downed-boss
-      flags) — not a generic answer.
-- [ ] **Manual done-when (human runs Terraria):** a real progression question —
-      e.g. `/bot why do I keep dying to Skeletron` on a pre-Hardmode character —
-      is answered **correctly and progression-aware in-game**, end to end, with
-      live state. The full smoke flow (FAQ + agent + cold-start) works from the
-      mod. Recorded for the demo. **Ticks on manual verification, not CI.**
-- [ ] RUNBOOK §demo: the in-game click-through (launch → `/bot` → answer) added
-      to the demo flow.
+- [x] Full path live: `/bot <question>` from inside Terraria → JWT-authed
+      `/bot/ask` → router → agent (Cargo class detection + RAG) → reply rendered
+      via `Print()`. Verbatim in `client/VERIFICATION.md` §4.4 (`routing=agent`,
+      session threaded). **Both router paths fire** — `faq` for "what does the
+      Confused debuff do?", `agent` for "skeletron" / "what next" (4.3 hit only agent).
+- [x] State-dependent correctness: same "what should I do next?" under **melee**
+      vs **ranger** loadouts → different class-appropriate advice (Sword/Spear vs
+      bow/arrows/ammunition), class read from real equipped gear (D-026). The live
+      state drives the answer.
+- [x] **P-016 fixed (the one contained prompt fix):** intermittent grounding →
+      reliable — one grounding instruction in `agent_system.md` (live state is
+      available every turn via the tools; ground first, never ask for lookupable
+      state). After-pass: 3/3 grounded under one loadout, none asked for context;
+      broad measurement deferred to Section 6's eval harness. `client/VERIFICATION.md` §4.4.
+- [x] **Manual done-when (verified in-game, no CI):** a real progression question
+      answered correctly + progression-aware end to end with live state; both FAQ
+      and agent paths exercised; the in-game turn produces **one clean Langfuse
+      trace** (`bot.ask → router → agent/faq → rag.retrieve + llm`, real token
+      counts). All in `client/VERIFICATION.md` §4.4 — **the PR's gate**.
+- [x] RUNBOOK §10: the in-game demo click-through (stack up → config → `/bot login`
+      → FAQ Q → hard Q → swap gear → different answer → Langfuse trace) added.
 
 ---
 
