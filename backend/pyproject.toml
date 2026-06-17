@@ -19,6 +19,7 @@ dependencies = [
     "pyjwt>=2.13.0",
     "pyyaml>=6.0",
     "redis>=8.0.0",
+    "rq>=2.0",
     "sentence-transformers>=5.5.1",
     "sqlalchemy[asyncio]>=2.0",
     "uvicorn[standard]>=0.30",
@@ -63,6 +64,10 @@ strict = true
 python_version = "3.12"
 exclude = ["app/db/migrations/versions/"]
 plugins = ["pydantic.mypy"]
+# rq ships py.typed but many methods (refresh/enqueue/…) lack return annotations,
+# so strict's disallow_untyped_calls flags calls *into* rq. Exempt the rq package
+# from that check only — our own code stays fully checked.
+untyped_calls_exclude = ["rq"]
 
 [[tool.mypy.overrides]]
 module = [
