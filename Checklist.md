@@ -612,14 +612,14 @@ Player-facing CONFIG surface (D-011). No chat. Vite + React. Polished (D-011 rev
 ### Phase 5.2 · Streamlit operator/test bench — `feat/21-frontend-admin`
 Operator surface + THE DEMO FALLBACK (RUNBOOK §7.1). Full-parity test chat is the priority (exercises the exact /bot/ask path without Terraria).
 
-- [ ] **Admin-endpoint AUDIT first (your call):** check which `/admin/*` actually exist + are tested — `/admin/versions/check`, `/admin/rerag`, `/admin/tenants`, `/admin/audit-log`. Scope the admin UI to what's REAL; flag any missing as explicit deferrals (don't build UI against a 404, don't silently build the missing endpoints — log the gap and decide per-endpoint).
-- [ ] **Operator login:** Streamlit page → `/auth/jwt/login`; gate the admin pages behind an operator (is_superuser) token; non-operator → blocked. (First operator bootstrapped via RUNBOOK §3 script.)
-- [ ] **TEST CHAT (priority — the demo fallback):** hand-enter (or pick a preset) a StatePayload + a question → POST `/bot/ask` → render the answer + show the routing (faq/agent) + session_id. This exercises the FULL pipeline (router → agent/RAG → response) WITHOUT Terraria. Include a couple of preset payloads (e.g. a melee pre-boss, a ranger loadout) so the demo is one click. May stream for dev convenience (ARCH §13.1). This is what you fall back to if the game won't launch.
-- [ ] **Corpus & Versions** (scoped to audited endpoints): list stored versions + manifest counts; "check for new version"; trigger re-rag (if `/admin/rerag` exists — else deferred, the SCRIPT is the must-have per ARCH §10).
-- [ ] **Tenants / audit:** read-only tenant list (`/admin/tenants`) + audit-log view (`/admin/audit-log`) — if they exist; else flag.
-- [ ] **Compose:** `frontend-admin` service on :8501; `docker compose up` → admin loads.
-- [ ] **Manual verify (the done-when):** operator login → test chat with a preset payload → full agent answer renders with routing shown (the whole path, no game). Corpus/tenant views load for what's built. Capture for the PR + as a demo-fallback artifact.
-- [ ] CI green. `ARCH.md §13.1`, RUNBOOK §7.1 (the fallback procedure) + §3 (operator bootstrap). Tick 5.2.
+- [x] **Admin-endpoint audit (backend-first):** audited the routers — **none** of `/admin/*` existed (+ the operator bootstrap was documented in RUNBOOK §3 but unbuilt). Per-endpoint: **built** `/admin/tenants` + `/admin/audit-log` (+ the bootstrap); **deferred** `/admin/versions/check` (P-018) + `/admin/rerag` (P-019 — the `build_corpus.py` script is the must-have). The no-RLS + `terramind_app` SELECT-grant facts were verified against the migrations.
+- [x] **Operator login:** Streamlit → `/auth/jwt/login`; the bench is JWT-role-gated (player blocked) and the backend `require_operator` (403) is the real enforcement. First operator via `app/entrypoints/bootstrap_operator` (RUNBOOK §3 — now honest, command pointed at nonexistent code before).
+- [x] **TEST CHAT (the demo fallback):** 3 preset StatePayloads (melee pre-boss / ranger post-EoC / mage post-Plantera — **real Cargo item_ids** → truthful class detection: 3507 melee, 98 ranger, 518 mage) + a question → `POST /bot/ask` → renders answer + **routing** + session_id, with the raw payload shown. Verified each gives class-distinct, progression-aware answers (melee→sword, ranger→bow, mage→Golem); FAQ routes `faq`.
+- [x] **Corpus & Versions:** stored versions via `GET /versions` + a note that re-rag is `scripts/build_corpus.py` (P-019 — no button).
+- [x] **Tenants / audit:** the two operator views `GET /admin/tenants` + `GET /admin/audit-log` (load in-browser — tenants cross-tenant, audit shows `tenant.erased` + `auth.login`).
+- [x] **Compose:** real `frontend-admin` Streamlit service on `:8501` (server-side calls → **no CORS**), `depends_on api`. Cold `down && up --build` comes up clean in **one** command (api `start_period` 150→**240s** + `retries` 12 — fixed a third false-alarm, proven by a cold boot).
+- [x] **Manual verify (done-when):** operator login → test chat preset → agent answer + routing render (no game); versions/tenants/audit load; **player blocked**. Verified in-browser; the test chat is the RUNBOOK §7.1 demo-fallback artifact.
+- [x] CI green (backend **259 tests**; bench has no CI — Streamlit, like the React portal). `ARCH.md §13.1`, RUNBOOK §7.1 + §3, DECISIONS (P-018/P-019 + D-017 generalized), LICENSES (streamlit/httpx). **5.2 done — Section 5 complete.**
 
 ---
 

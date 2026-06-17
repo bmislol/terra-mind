@@ -168,24 +168,33 @@ services:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
       interval: 10s
       timeout: 5s
-      retries: 10
-      # Lifespan boot (Vault → embedding model → Cargo) takes ~100-140s; the grace
-      # period must cover it so a fresh `up` doesn't mark api unhealthy and skip
-      # frontend-user (which depends_on api: service_healthy).
-      start_period: 150s
+      retries: 12
+      # Lifespan boot (Vault → embedding model → Cargo) can run well past the ~140s
+      # nominal on a cold `up --build` (concurrent image builds + a loaded host).
+      # Generous grace so api flips healthy *during* start_period and the frontends
+      # (depends_on api: service_healthy) are never skipped. Proven by a cold
+      # `down && up --build`. (150s false-alarmed under build contention.)
+      start_period: 240s
 
-  # ── Frontends (frontend-admin = stub until Phase 5.2) ──────────────────────
+  # ── Frontends ──────────────────────────────────────────────────────────────
 
   frontend-admin:
-    image: python:3.12-slim
-    command: ["python", "-m", "http.server", "8501"]
+    build:
+      context: frontend-admin
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      # Server-side calls (httpx from the Streamlit process) → the api service.
+      API_BASE_URL: http://api:8000
     ports:
       - "${FRONTEND_ADMIN_PORT:-8501}:8501"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 20s
 
   frontend-user:
     build:

@@ -1,0 +1,170 @@
+"""TerraMind operator / test bench (Phase 5.2).
+
+Operator-gated Streamlit bench. The **test chat** is the centerpiece: it drives
+the full `/bot/ask` pipeline (router → agent/RAG → answer) with a preset
+StatePayload, so the live demo has a fallback if the game won't launch (RUNBOOK
+§7.1). Plus operator views: corpus versions, tenants, audit log.
+
+Gating: a player token can log in but is blocked from the bench — the real
+enforcement is the backend (`require_operator` → 403 on `/admin/*`); this just
+hides the UI.
+"""
+
+from __future__ import annotations
+
+import admin_api as api
+import streamlit as st
+from presets import PRESETS
+
+st.set_page_config(page_title="TerraMind — Operator/Test Bench", layout="wide")
+
+st.session_state.setdefault("token", None)
+st.session_state.setdefault("role", None)
+st.session_state.setdefault("session_id", None)
+st.session_state.setdefault("last_answer", None)
+st.session_state.setdefault("preset", None)
+
+
+def _logout() -> None:
+    for key in ("token", "role", "session_id", "last_answer", "preset"):
+        st.session_state[key] = None
+
+
+# ── Sidebar: login ────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.title("TerraMind")
+    st.caption("Operator / test bench")
+    if st.session_state.token is None:
+        with st.form("login_form"):
+            email = st.text_input("Email", value="operator@terra-mind.dev")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Log in")
+        if submitted:
+            try:
+                token = api.login(email, password)
+                st.session_state.token = token
+                st.session_state.role = api.token_role(token)
+                st.rerun()
+            except api.ApiError as exc:
+                st.error(f"Login failed: {exc}")
+            except Exception as exc:  # noqa: BLE001 — surface any connection error
+                st.error(f"Could not reach the API: {exc}")
+    else:
+        st.success(f"Logged in — role: **{st.session_state.role or 'unknown'}**")
+        st.button("Log out", on_click=_logout)
+
+# ── Gates ─────────────────────────────────────────────────────────────────────
+if st.session_state.token is None:
+    st.info(
+        "Log in to use the bench. You need an **operator** account — bootstrap "
+        "one first (see the README / RUNBOOK §3)."
+    )
+    st.stop()
+
+if st.session_state.role != "operator":
+    st.error(
+        "This is the **operator** bench, but you're logged in as a **player**. "
+        "Bootstrap an operator (RUNBOOK §3) and log in with that account."
+    )
+    st.stop()
+
+# ── Operator bench ────────────────────────────────────────────────────────────
+st.title("Operator / Test Bench")
+tab_chat, tab_versions, tab_tenants, tab_audit = st.tabs(
+    ["🤖 Test chat", "📚 Versions", "👥 Tenants", "📜 Audit log"]
+)
+
+with tab_chat:
+    st.subheader("Test chat — the full pipeline, no Terraria")
+    st.caption(
+        "Preset character state + question → POST /bot/ask → router → agent/RAG → "
+        "answer. This is the demo fallback if the live game breaks (RUNBOOK §7.1)."
+    )
+    left, right = st.columns(2)
+
+    with left:
+        preset_name = st.selectbox("Preset character state", list(PRESETS.keys()))
+        # Switching presets starts a fresh conversation (no cross-character memory).
+        if st.session_state.preset != preset_name:
+            st.session_state.preset = preset_name
+            st.session_state.session_id = None
+            st.session_state.last_answer = None
+        state = PRESETS[preset_name]
+
+        message = st.text_input("Question", value="What should I do next?")
+        ask_clicked = st.button("Ask", type="primary")
+        if st.button("New conversation"):
+            st.session_state.session_id = None
+            st.session_state.last_answer = None
+            st.rerun()
+
+        st.caption("Raw StatePayload being sent:")
+        st.json(state)
+
+    with right:
+        if ask_clicked:
+            try:
+                with st.spinner("Routing → agent/RAG…"):
+                    result = api.ask(
+                        st.session_state.token,
+                        message=message,
+                        state=state,
+                        session_id=st.session_state.session_id,
+                    )
+                st.session_state.session_id = result.get("session_id")
+                st.session_state.last_answer = result
+            except api.ApiError as exc:
+                st.error(f"/bot/ask failed: {exc}")
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"Could not reach the API: {exc}")
+
+        answer = st.session_state.last_answer
+        if answer:
+            st.metric("routing", answer.get("routing", "?"))
+            st.markdown(answer.get("answer", ""))
+            st.caption(f"session_id: `{answer.get('session_id')}`")
+            chunks = answer.get("source_chunks") or []
+            if chunks:
+                with st.expander(f"source_chunks ({len(chunks)})"):
+                    st.json(chunks)
+        else:
+            st.info("Pick a preset and press **Ask**.")
+
+with tab_versions:
+    st.subheader("Corpus versions")
+    try:
+        st.write(api.versions() or "(none)")
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"Could not load versions: {exc}")
+    st.info(
+        "Re-rag (snapshot + embed) is a **script, not a button** (P-019): run "
+        "`scripts/build_corpus.py` (ARCH §10). The admin button is deferred."
+    )
+
+with tab_tenants:
+    st.subheader("Tenants — operator view")
+    try:
+        rows = api.tenants(st.session_state.token)
+        st.dataframe(rows, use_container_width=True)
+        st.caption(
+            f"{len(rows)} tenants — cross-tenant operator read "
+            "(`require_operator`, not RLS-scoped — `tenants` has no RLS, D-017)."
+        )
+    except api.ApiError as exc:
+        st.error(f"/admin/tenants failed: {exc}")
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"Could not reach the API: {exc}")
+
+with tab_audit:
+    st.subheader("Audit log — operator view")
+    try:
+        rows = api.audit_log(st.session_state.token)
+        st.dataframe(rows, use_container_width=True)
+        st.caption(
+            f"{len(rows)} recent events — tenant.erased / auth.login / "
+            "session.revoked (SECURITY §6)."
+        )
+    except api.ApiError as exc:
+        st.error(f"/admin/audit-log failed: {exc}")
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"Could not reach the API: {exc}")

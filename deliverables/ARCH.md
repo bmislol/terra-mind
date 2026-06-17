@@ -181,7 +181,7 @@ First operator is bootstrapped via a script (RUNBOOK §3).
 
 ## 7. Endpoint Inventory
 
-_Status: auth + `/bot/ask` gating landed Phase 4.1a; `/versions` + `/me/preferences` (GET/PATCH) landed **Phase 5.1**, plus a **locked-origin CORS allow-list** for the browser portal (never `*`); `/admin/*` pending Phase 5.2. Phase tags in Notes column._
+_Status: auth + `/bot/ask` gating landed Phase 4.1a; `/versions` + `/me/preferences` (GET/PATCH) landed **Phase 5.1** (+ a locked-origin CORS allow-list, never `*`); `/admin/tenants` + `/admin/audit-log` landed **Phase 5.2** (`/admin/versions/check` + `/admin/rerag` deferred — P-018/P-019). Phase tags in Notes column._
 
 | Method | Endpoint | Roles | Notes |
 |---|---|---|---|
@@ -197,10 +197,10 @@ _Status: auth + `/bot/ask` gating landed Phase 4.1a; `/versions` + `/me/preferen
 | `GET` | `/me/preferences` | Player (**access JWT**) | Read own preferences; **RLS-scoped** via the `tenant_preferences` table (fail-closed policy, D-011 revision / Option 2). **Implemented Phase 5.1.** _(stored `selected_version` is NOT yet consumed by `/bot/ask` retrieval — P-017.)_ |
 | `PATCH` | `/me/preferences` | Player (**access JWT**) | Upsert own preferences (RLS-scoped). **Implemented Phase 5.1.** |
 | `DELETE` | `/me` | Player (access JWT) | **Conversation/data erasure (D-032), implemented Phase 4.1b** — purges the tenant's `messages`/`sessions` (RLS-scoped DELETE) + Redis history keys + a `tenant.erased` audit row. **Keeps the account row** (full account/email deletion → P-015). |
-| `GET` | `/admin/versions/check` | operator | Check whether the live wiki has a newer version than the latest stored snapshot. |
-| `POST` | `/admin/rerag` | operator | Trigger a re-rag (snapshot + embed) as a background job (button is stretch; script is must-have). |
-| `GET` | `/admin/tenants` | operator | List tenants. |
-| `GET` | `/admin/audit-log` | operator | Audit log (erasure + re-rag events). |
+| `GET` | `/admin/tenants` | operator (**`require_operator`**) | List all tenants (id/email/is_guest/created_at). **Cross-tenant** read, NOT RLS-scoped — `tenants` has no RLS (D-017); the gate is the control. **Implemented Phase 5.2.** |
+| `GET` | `/admin/audit-log` | operator (**`require_operator`**) | Recent audit events (`tenant.erased`/`auth.login`/`session.revoked`, SECURITY §6). Cross-tenant read of the non-RLS `audit_log` (D-017). **Implemented Phase 5.2.** |
+| `GET` | `/admin/versions/check` | operator | Newer-than-stored wiki check. **Deferred (P-018)** — live-wiki compare, ~zero demo value; the admin view lists stored versions via `GET /versions`. |
+| `POST` | `/admin/rerag` | operator | Trigger re-rag as a background job. **Deferred (P-019)** — `scripts/build_corpus.py` is the must-have (ARCH §10); the button is stretch. |
 
 ## 8. Memory Plan
 
@@ -390,11 +390,12 @@ Structured JSON via `app/core/logging.py::JSONFormatter`:
 
 ### 13.1 Streamlit Admin (`frontend-admin/`)
 
-Operator / test bench on `localhost:8501`. Pages:
-- **Login** — operator JWT login.
-- **Corpus & Versions** — list stored versions, run "check for new version", trigger re-rag, view manifest + counts.
-- **Tenants** — read-only tenant list, audit-log view.
-- **Test Chat** — exercises the `/bot/ask` flow with a hand-entered or mocked state payload, so the full agent path is demoable without launching Terraria. May stream for dev convenience.
+Operator / test bench on `localhost:8501` (Streamlit). **Implemented Phase 5.2.** Operator-gated — a player token logs in but is blocked from the bench (the real gate is the backend `require_operator` → 403; the UI just hides it). All API calls are **server-side** (httpx from the Streamlit process) → **no CORS** (not a browser origin). Tabs:
+- **Test chat (centerpiece, the demo fallback — RUNBOOK §7.1):** pick a **preset** `StatePayload` (melee pre-boss / ranger post-EoC / mage hardmode — real `item_id`s where confident, D-026) + a question → `POST /bot/ask` → renders the **answer**, **routing** (faq/agent), session_id, and the raw payload sent. The full router → agent/RAG path, no Terraria.
+- **Versions** — stored corpus versions via `GET /versions` (+ a note that re-rag is `scripts/build_corpus.py`, not a button — P-019).
+- **Tenants** + **Audit log** — the operator views `GET /admin/tenants` + `GET /admin/audit-log` (cross-tenant, `require_operator`-gated; not RLS-scoped — D-017).
+
+`/admin/versions/check` (P-018) and the `/admin/rerag` button (P-019) are deferred — the `build_corpus.py` script is the must-have (ARCH §10).
 
 ### 13.2 React Config Portal (`frontend-user/`)
 
