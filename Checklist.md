@@ -597,17 +597,17 @@ Goal: the two web surfaces over the proven backend — the React **config** port
 ### Phase 5.1 · React config portal — `feat/20-frontend-user`
 Player-facing CONFIG surface (D-011). No chat. Vite + React. Polished (D-011 revision). Wires endpoints already built + CI-green in Section 4.
 
-- [ ] **Endpoint reality check first:** confirm the endpoints the portal needs exist + their exact request/response shapes — `/auth/register`, `/auth/jwt/login`, `/auth/guest`, `/versions`, `/me/preferences` (GET+PATCH), `DELETE /me`. Read the routers, don't assume from ARCH §7.
-- [ ] **CORS:** confirm the API allows the portal origin (localhost:5173). If CORS middleware isn't configured for it, add it (backend change, CI-tested) — this is the #1 thing that silently breaks browser→API.
-- [ ] `frontend-user/` scaffold: Vite + React, single bundle, the 3 deps in LICENSES.md (react, react-dom, vite) — justify any addition.
-- [ ] **Auth:** login / register / continue-as-guest; store the JWT client-side (the access+refresh pair from D-006/D-029); attach the Bearer token to authed calls; handle 401 (expired) → refresh or re-login. NO password persistence.
-- [ ] **Version:** dropdown of `/versions`; "check for new version" (operator-only endpoint — portal shows the player's selectable list).
-- [ ] **Preferences:** read (GET `/me/preferences`) + update (PATCH), incl. selected version; reflect saved state.
-- [ ] **Account / erasure:** `DELETE /me` button with a confirm step (it's destructive — data erasure, D-032); show success/empty state.
-- [ ] **Polish (timeboxed):** consistent layout, labeled forms, loading states, readable errors (not raw JSON), basic responsive. STOP at clean — no animation/design rabbit-hole. NO browser localStorage for anything but the token, and even that per the auth design.
-- [ ] **Compose:** `frontend-user` service serves the built bundle (nginx or vite preview); `docker compose up` → portal on :5173; `/healthz`-equivalent or root loads.
-- [ ] **Manual verify (the done-when):** register a new player → pick a version → set prefs (persist across reload) → request erasure (data gone). Guest path: continue-as-guest → limited session. Capture the flow (screenshots) for the PR.
-- [ ] CI green (lint/build for the frontend if wired; backend CI for any CORS change). `ARCH.md §13.2`, `LICENSES.md §6` (confirm JS deps), D-011 revision in `DECISIONS.md`. Tick 5.1.
+- [x] **Endpoint reality check (Part A):** confirmed against the routers — `/auth/register`, `/auth/jwt/login` (form), `/auth/guest`, `DELETE /me` exist; **`/versions` and `/me/preferences` did NOT** → built them (build-now per the audit).
+- [x] **CORS (Part A):** the API had no CORS middleware (the mod was C#, no browser). Added a **locked-origin** allow-list — `add_cors`, origin from env (default localhost:5173), **never `*`** (rejected in code + tested).
+- [x] `frontend-user/` scaffold: Vite + React + TypeScript, single bundle (`tsc && vite build` green). Deps react/react-dom/vite + dev @vitejs/plugin-react/typescript/@types — justified in LICENSES §6 (dev-only).
+- [x] **Auth:** login / register / continue-as-guest; access+refresh pair in `localStorage` (**token-only, no password**); Bearer on authed calls; **401 → `/auth/refresh` + retry**, else re-login (guests access-only).
+- [x] **Version:** dropdown from `GET /versions` (public corpus metadata; one version now — `1.4.4.9`).
+- [x] **Preferences:** GET on load + PATCH on save (incl. selected version); reflects saved state; **persists across reload** (verified in-browser).
+- [x] **Account / erasure:** `DELETE /me` behind a confirm step (destructive, D-032); success state. **Hidden for guests** (no persisted data); preferences **retained** (D-032 extended).
+- [x] **Polish (timeboxed):** clean dark layout, labeled forms, loading states, readable errors (parsed `detail`, not raw JSON), basic responsive. Stopped at clean. **`localStorage` = token only**; all else React state. _(Design-token SKILL unavailable → standard defaults.)_
+- [x] **Compose:** `frontend-user` builds (node → nginx) on `:5173`, `depends_on api: service_healthy` (api `start_period` bumped 5s→150s for a clean cold `up`).
+- [x] **Manual verify (done-when):** verified in-browser — register → version → prefs persist across a HARD reload → erasure (data gone + logged out; re-login shows prefs survived); guest path works.
+- [x] CI green: backend **255 tests** (ruff/format/mypy/pytest) incl. CORS + RLS-prefs isolation; portal builds clean (no frontend CI wired). `ARCH.md §13.2`, `LICENSES.md §6`, D-011 revision + P-017 + D-032 extension in `DECISIONS.md`. **5.1 done.**
 
 ### Phase 5.2 · Streamlit operator/test bench — `feat/21-frontend-admin`
 Operator surface + THE DEMO FALLBACK (RUNBOOK §7.1). Full-parity test chat is the priority (exercises the exact /bot/ask path without Terraria).

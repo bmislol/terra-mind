@@ -79,6 +79,12 @@ Confirmed in Phase 5.1.
 | `react` | Config-portal UI | MIT |
 | `react-dom` | Config-portal UI | MIT |
 | `vite` | Bundler / dev server | MIT |
+| `@vitejs/plugin-react` | Vite React plugin (JSX transform / Fast Refresh) — required for a Vite+React build | MIT |
+| `typescript` | Typed source (matches the backend's typed discipline) | Apache-2.0 |
+| `@types/react` | React type definitions (dev-only) | MIT |
+| `@types/react-dom` | React-DOM type definitions (dev-only) | MIT |
+
+_The last four are **dev/build-time only** (not shipped in the bundle) — the standard, minimal Vite + React + TypeScript toolchain. No runtime UI/CSS libraries beyond `react`/`react-dom`; styling is plain CSS (the design-token SKILL was unavailable in the build env, so standard defaults were used)._
 
 ## 7. Infrastructure Images
 

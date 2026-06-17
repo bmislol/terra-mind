@@ -169,9 +169,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 5s
+      # Lifespan boot (Vault → embedding model → Cargo) takes ~100-140s; the grace
+      # period must cover it so a fresh `up` doesn't mark api unhealthy and skip
+      # frontend-user (which depends_on api: service_healthy).
+      start_period: 150s
 
-  # ── Frontends (stubs) ──────────────────────────────────────────────────────
+  # ── Frontends (frontend-admin = stub until Phase 5.2) ──────────────────────
 
   frontend-admin:
     image: python:3.12-slim
@@ -185,12 +188,19 @@ services:
       retries: 5
 
   frontend-user:
-    image: python:3.12-slim
-    command: ["python", "-m", "http.server", "5173"]
+    build:
+      context: frontend-user
+      args:
+        # Baked into the bundle at build time; the browser (on the host) calls
+        # the host-mapped API. Override via VITE_API_BASE_URL.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    depends_on:
+      api:
+        condition: service_healthy
     ports:
-      - "${FRONTEND_USER_PORT:-5173}:5173"
+      - "${FRONTEND_USER_PORT:-5173}:80"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5173')"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5

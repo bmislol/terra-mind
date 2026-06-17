@@ -398,13 +398,15 @@ Operator / test bench on `localhost:8501`. Pages:
 
 ### 13.2 React Config Portal (`frontend-user/`)
 
-Player-facing **configuration** surface, built with Vite. **No chat.** Kept minimal (forms) so it can degrade to a Streamlit page if the clock tightens (D-011). Screens:
-- **Login / Register / Continue as guest.**
-- **Version** — dropdown of available corpora + "check for new version".
-- **Preferences** — selected version + any per-tenant settings.
-- **Account** — right-to-erasure button (`DELETE /me`).
+Player-facing **configuration** surface — Vite + React + TypeScript, a **polished** demo surface (D-011 revision). **No chat. Implemented Phase 5.1.** Screens:
+- **Login / Register / Continue as guest** — JWT pair stored client-side (localStorage, **token-only — no password**); Bearer on authed calls; `401 → POST /auth/refresh + retry`, else re-login (guests are access-only, no refresh).
+- **Version** — dropdown from `GET /versions` (public, shared corpus metadata).
+- **Preferences** — `GET`/`PATCH /me/preferences` (selected version); persists across reload. _(stored `selected_version` not yet consumed by `/bot/ask` retrieval — P-017.)_
+- **Account** — right-to-erasure button (`DELETE /me`) behind a confirm step (D-032).
 
-Auth: Bearer JWT from `/auth/jwt/login` or `/auth/guest`, stored client-side.
+Auth: Bearer JWT from `/auth/jwt/login` or `/auth/guest`, stored client-side. Served as a static bundle (nginx) on `:5173` (compose `frontend-user`); the API base is baked at build time (`VITE_API_BASE_URL`, default `http://localhost:8000`) and CORS for this origin is configured backend-side (locked allow-list, never `*`). The design-token SKILL was unavailable in the build env → standard React/CSS defaults.
+
+**Two clients, two logins (design choice):** the portal and the game-client mod are **separate clients with separate logins** — the portal's JWT lives in the **browser** (`localStorage`), the mod's in **`token.json`** (D-027). Logging into one does **not** log into the other; a player authenticates **once per client**. **Guest is portal-only** — the mod's `/bot login` is real-account only (no guest path). Erasure (`DELETE /me`) is hidden for guest sessions (a guest has no persisted data to delete).
 
 ### 13.3 Game Client (`client/`) — production chat surface
 
