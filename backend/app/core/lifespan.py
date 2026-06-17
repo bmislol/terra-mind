@@ -18,6 +18,7 @@ from app.db.session import make_session_factory
 from app.infra.anthropic import AnthropicClient
 from app.infra.tracing import init_langfuse
 from app.infra.vault import load_secrets
+from app.jobs.queue import redis_connection, rerag_queue
 from app.rag.embedder import Embedder
 from app.rag.pipeline import RetrievalPipeline
 
@@ -169,6 +170,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ── Redis (session-revocation denylist, D-029; short-term memory later) ─────
     redis_client = await check_redis(settings.redis_url)
     app.state.redis = redis_client
+
+    # ── Re-rag job queue (RQ on the existing Redis, D-033) ─────────────────────
+    # A SYNC connection (RQ requires sync) for enqueuing the operator re-rag job
+    # and acquiring the single-job lock — distinct from the async app.state.redis
+    # above. Redis.from_url is lazy; the check_redis above already proved Redis up.
+    app.state.rerag_queue = rerag_queue(redis_connection(settings.redis_url))
 
     # ── Embedding model + retrieval pipeline ───────────────────────────────────
     # Embedder loads ~90 MB of model weights — done once at startup, never

@@ -670,17 +670,27 @@ Operator surface + THE DEMO FALLBACK (RUNBOOK §7.1). Full-parity test chat is t
       tests green + a new test asserts the callback fires and the build
       still upserts. A-gate green (262 tests).
 
-**Commit 3 — API + job + guard:**
-- [ ] `rerag_jobs` table — minimal (id, version, status, progress,
-      started/finished, error); **operator/cross-tenant data → NO RLS
-      policy, `require_operator`-gated** (D-017 two-categories), not a
-      fail-closed tenant policy. Confirm in the migration.
-- [ ] The job fn (calls `run_build` with a Redis-writing progress cb +
-      writes the `corpus.reragged` audit on completion + releases the lock).
-- [ ] Single-job guard — Redis `SET rerag:lock NX EX` → **409** if held.
-- [ ] `POST /admin/rerag` (start → job id; 409 if busy) +
-      `GET /admin/rerag/status/{id}` (poll). Operator-gated. Tests:
-      enqueue→id, 2nd→409, status poll, player→403.
+**Commit 3 — API + job + guard (done):**
+- [x] `rerag_jobs` table (migration `e4f5a6b7c8d9`) — minimal (id, version,
+      status, stage/done/total, created/started/finished, error);
+      **operator/cross-tenant → NO RLS policy, `terramind_app` grant +
+      `require_operator`-gated** (D-017 two-categories), not a fail-closed
+      tenant policy. Confirmed in the migration.
+- [x] Job fn (`app/jobs/rerag.py`) — sync worker entrypoint: marks running
+      → `run_build(force=False, progress=cb)` writing the Redis hash + the
+      durable row → on success `corpus.reragged` audit + succeeded + release
+      lock; on failure record error + re-raise (RQ retries, idempotent).
+- [x] Single-job guard — `SET rerag:lock NX EX` → **409** if held; worker
+      releases on finish + heartbeats the TTL each tick.
+- [x] `POST /admin/rerag` (202 + job id; 409 if busy) +
+      `GET /admin/rerag/status/{id}` (durable row + live progress overlay),
+      operator-gated. Tests: start→id, 2nd→409, status poll/404, player→403
+      on both, + the job fn (run_build faked) succeeds/audits/releases.
+- [x] **Relocated `run_build` → `app/rag/corpus_build.py`** (the worker
+      image ships `app/` not `scripts/`; avoids an app→scripts inversion).
+      `scripts/build_corpus.py` is now a thin CLI. **Fixed** the sync DSN to
+      `postgresql+psycopg://` (psycopg2 is not a dep — the worker would have
+      crashed at engine creation). A-gate green (266 tests).
 
 **Commit 4 — UI + close:**
 - [ ] Streamlit Versions tab: re-rag button + polling progress (replaces

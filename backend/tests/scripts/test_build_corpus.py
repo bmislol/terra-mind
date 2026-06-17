@@ -1,4 +1,9 @@
-"""Unit tests for scripts/build_corpus.py helpers.  No live DB or network."""
+"""Unit tests for the corpus build logic (app/rag/corpus_build.py).
+
+The build lives in app/ (importable by the CLI and the re-rag worker alike,
+Phase 5.3); scripts/build_corpus.py is now just the CLI front-end. No live DB
+or network.
+"""
 
 import itertools
 import json
@@ -11,9 +16,9 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy import text
 
-import scripts.build_corpus as build_corpus
+import app.rag.corpus_build as build_corpus
+from app.rag.corpus_build import _UPSERT_SQL, _upsert_chunks, _write_orphan_recipes
 from app.rag.models import ChunkRecord
-from scripts.build_corpus import _UPSERT_SQL, _upsert_chunks, _write_orphan_recipes
 
 # ── Upsert correctness ────────────────────────────────────────────────────────
 

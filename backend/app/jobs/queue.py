@@ -22,7 +22,24 @@ from rq import Queue
 #: The single queue re-rag jobs are enqueued onto / the worker listens on.
 RERAG_QUEUE = "rerag"
 
+#: Single-job guard: a 2nd /admin/rerag while one runs is rejected (409). The api
+#: acquires it (SET NX) at enqueue; the worker releases it on finish and refreshes
+#: its TTL each progress tick, so a live job never self-expires but a *dead*
+#: worker's lock frees within the TTL (D-033).
+RERAG_LOCK_KEY = "rerag:lock"
+#: Lock TTL — comfortably longer than a real CPU re-rag of this corpus; refreshed
+#: on every progress tick (heartbeat).
+RERAG_LOCK_TTL_SECONDS = 1800
+#: Live-progress hash TTL — the hash self-cleans; the durable rerag_jobs row is
+#: the source of truth once it's gone.
+RERAG_PROGRESS_TTL_SECONDS = 3600
+
 _DEFAULT_REDIS_URL = "redis://redis:6379/0"
+
+
+def rerag_progress_key(job_id: str) -> str:
+    """Redis hash key for a job's live ``{stage, done, total}`` progress."""
+    return f"rerag:progress:{job_id}"
 
 
 def redis_connection(url: str | None = None) -> Redis:
