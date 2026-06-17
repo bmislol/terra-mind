@@ -15,6 +15,7 @@ import json
 import os
 import sys
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -119,33 +120,59 @@ def _update_manifest(
     os.replace(tmp, manifest_path)
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ── Progress reporting ────────────────────────────────────────────────────────
+
+# A progress sink: ``(stage, done, total)``. The default prints (preserving the
+# CLI's behaviour); the re-rag worker (Phase 5.3) passes a callback that writes
+# to Redis + the rerag_jobs row so the operator can watch a build stream live.
+ProgressFn = Callable[[str, int, int], None]
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Chunk, embed, and upsert the Terraria wiki corpus into pgvector."
-    )
-    parser.add_argument(
-        "--version", required=True, help="game_version tag, e.g. 1.4.4.9"
-    )
-    parser.add_argument(
-        "--db-url",
-        default=os.environ.get("DATABASE_URL", ""),
-        help="Postgres connection URL (defaults to DATABASE_URL env var).",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Delete all rag_chunks for this game_version before inserting.",
-    )
-    args = parser.parse_args(argv)
+def _print_progress(stage: str, done: int, total: int) -> None:
+    """Default progress sink — prints, the way the CLI always has."""
+    if total:
+        pct = int(done / total * 100)
+        print(f"[corpus] {stage}: {done}/{total} ({pct}%)")
+    else:
+        print(f"[corpus] {stage}…")
 
-    if not args.db_url:
-        print("[corpus] ERROR: --db-url or DATABASE_URL required.", file=sys.stderr)
-        return 1
 
-    raw_dir = _DATA_ROOT / args.version
+def _sync_db_url(db_url: str) -> str:
+    """The app uses asyncpg; this sync script needs a plain psycopg/sync URL."""
+    if db_url.startswith("postgresql+asyncpg://"):
+        return db_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+    return db_url
+
+
+# ── Build ──────────────────────────────────────────────────────────────────────
+
+
+def run_build(
+    version: str,
+    db_url: str,
+    *,
+    force: bool = False,
+    progress: ProgressFn = _print_progress,
+) -> int:
+    """Chunk + embed + upsert the cached corpus for ``version`` into pgvector.
+
+    Reads ``data/raw/<version>/`` (pages + cargo) — it does **not** scrape — and
+    reports through ``progress(stage, done, total)`` as it goes (``loading`` while
+    the embedding model starts, then ``embedding`` per page). The CLI passes the
+    printing default; the re-rag worker passes a Redis/DB-writing callback.
+
+    **Retry-safety (D-033).** With ``force=False`` — the default, and the *only*
+    way the re-rag worker calls this — every chunk is written via the idempotent
+    ``ON CONFLICT (page_id, chunk_index, game_version) DO UPDATE`` upsert
+    (``_UPSERT_SQL``), so a re-run resumes/overwrites cleanly: no duplicates, no
+    half-version, the version stays queryable throughout. ``force=True`` (CLI
+    ``--force`` only) does a destructive delete-then-insert and is **not**
+    retry-safe (a mid-run death leaves a half-deleted version); the worker never
+    sets it.
+
+    Returns ``0`` on success, ``1`` on a missing/invalid corpus on disk.
+    """
+    raw_dir = _DATA_ROOT / version
     pages_dir = raw_dir / "pages"
     cargo_dir = raw_dir / "cargo"
     manifest_path = raw_dir / "manifest.json"
@@ -203,22 +230,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[corpus] Orphan recipes (no wiki page): {orphan_count} → {orphan_path}")
 
     # Embedder startup.
+    progress("loading", 0, 0)
     print("[corpus] Loading embedding model…")
     embedder = Embedder()
     print(f"[corpus] Model ready: {embedder.model_name} dim={embedder.dim}")
 
-    # DB connection.
-    db_url = args.db_url
-    # The app uses asyncpg; for this sync script, use psycopg2-style URL.
-    if db_url.startswith("postgresql+asyncpg://"):
-        db_url = db_url.replace("postgresql+asyncpg://", "postgresql://", 1)
-    engine = sa.create_engine(db_url)
+    engine = sa.create_engine(_sync_db_url(db_url))
 
     with engine.begin() as conn:
-        if args.force:
+        if force:
             delete_result = conn.execute(
                 text("DELETE FROM rag_chunks WHERE game_version = :v"),
-                {"v": args.version},
+                {"v": version},
             )
             deleted = delete_result.rowcount
             print(f"[corpus] --force: deleted {deleted} existing chunks.")
@@ -226,12 +249,14 @@ def main(argv: list[str] | None = None) -> int:
     # Process pages.
     total_chunks = 0
     cargo_only_count = 0
+    total_pages = len(page_files)
+    progress("embedding", 0, total_pages)
 
     for page_num, page_file in enumerate(page_files, 1):
         page_data: dict[str, Any] = json.loads(page_file.read_text(encoding="utf-8"))
         chunks, is_cargo_only = chunk_page(
             page_data,
-            game_version=args.version,
+            game_version=version,
             cargo_items=cargo_items,
             cargo_recipes=cargo_recipes,
         )
@@ -249,18 +274,48 @@ def main(argv: list[str] | None = None) -> int:
 
         total_chunks += len(chunks)
 
-        if page_num % 50 == 0 or page_num == len(page_files):
-            pct = int(page_num / len(page_files) * 100)
-            print(f"[corpus] Processed {page_num}/{len(page_files)} pages ({pct}%)")
+        if page_num % 50 == 0 or page_num == total_pages:
+            progress("embedding", page_num, total_pages)
 
     print(
-        f"[corpus] Done. {len(page_files)} pages, {total_chunks} chunks, "
+        f"[corpus] Done. {total_pages} pages, {total_chunks} chunks, "
         f"cargo_stats_pages={cargo_only_count}, "
         f"model={embedder.model_name} dim={embedder.dim}"
     )
 
     _update_manifest(raw_dir, total_chunks, embedder.model_name, embedder.dim)
     return 0
+
+
+# ── CLI ────────────────────────────────────────────────────────────────────────
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Chunk, embed, and upsert the Terraria wiki corpus into pgvector."
+    )
+    parser.add_argument(
+        "--version", required=True, help="game_version tag, e.g. 1.4.4.9"
+    )
+    parser.add_argument(
+        "--db-url",
+        default=os.environ.get("DATABASE_URL", ""),
+        help="Postgres connection URL (defaults to DATABASE_URL env var).",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Delete all rag_chunks for this game_version before inserting "
+        "(NOT retry-safe — host-side manual use only; the re-rag worker never "
+        "uses it, D-033).",
+    )
+    args = parser.parse_args(argv)
+
+    if not args.db_url:
+        print("[corpus] ERROR: --db-url or DATABASE_URL required.", file=sys.stderr)
+        return 1
+
+    return run_build(args.version, args.db_url, force=args.force)
 
 
 if __name__ == "__main__":

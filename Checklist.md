@@ -661,9 +661,14 @@ Operator surface + THE DEMO FALLBACK (RUNBOOK §7.1). Full-parity test chat is t
       break the clean boot (api still flips healthy, frontends start).
 - [x] A-gate green (ruff/format/mypy/pytest incl. the round-trip).
 
-**Commit 2 — `build_corpus` progress refactor:**
-- [ ] Extract a callable `run_build(version, db_url, *, progress=…)`; CLI
-      unchanged (default print cb); existing corpus tests stay green.
+**Commit 2 — `build_corpus` progress refactor (done):**
+- [x] Extract a callable `run_build(version, db_url, *, force=False,
+      progress=…)`; CLI unchanged (default print cb); progress threaded at
+      the report points (`loading` → `embedding` to 100%). Default
+      `force=False` = the idempotent upsert (the worker's retry-safe path,
+      D-033); `--force` stays CLI-only, never the job. Existing corpus
+      tests green + a new test asserts the callback fires and the build
+      still upserts. A-gate green (262 tests).
 
 **Commit 3 — API + job + guard:**
 - [ ] `rerag_jobs` table — minimal (id, version, status, progress,
