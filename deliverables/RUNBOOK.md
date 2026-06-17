@@ -427,6 +427,8 @@ The full `StatePayload` JSON is written via the mod logger to tModLoader's **`cl
 
 The mod is a full authenticated chat client. Nothing on disk but a **revocable token** — never a password (D-027, SECURITY §4).
 
+**Two clients, two logins:** the mod and the React config portal (`frontend-user/`) are **separate clients** — the mod's token lives in `token.json`, the portal's in the browser (`localStorage`). Logging into the portal does **not** log you into the mod (or vice versa); a player logs in **once per client**. The mod's `/bot login` is **real-account only** — there is no guest path in-game (guest is a portal-only concept). See ARCH §13.2.
+
 1. **Backend URL (optional):** Mod Configuration → TerraMind → `BackendUrl` (default `http://localhost:8000`, D-028). The config holds the URL **only** — no credentials.
 2. **Log in:** `/bot login <email> <password>` → `POST /auth/jwt/login` (**form-encoded**). The password is used for that one request and **discarded** — never written to disk, never logged. Chat shows `logged in as <email>`; the access+refresh pair is saved to `token.json` under the tModLoader save dir (`<save>/TerraMind/token.json`).
 3. **Ask:** `/bot <question>` → `POST /bot/ask` with the Bearer access token + live `StatePayload` → contextual answer in chat.

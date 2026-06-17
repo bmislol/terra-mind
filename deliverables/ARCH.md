@@ -181,7 +181,7 @@ First operator is bootstrapped via a script (RUNBOOK §3).
 
 ## 7. Endpoint Inventory
 
-_Status: auth + `/bot/ask` gating landed Phase 4.1a; `/me/*`, `/versions`, `/admin/*` pending their phases. Phase tags in Notes column._
+_Status: auth + `/bot/ask` gating landed Phase 4.1a; `/versions` + `/me/preferences` (GET/PATCH) landed **Phase 5.1**, plus a **locked-origin CORS allow-list** for the browser portal (never `*`); `/admin/*` pending Phase 5.2. Phase tags in Notes column._
 
 | Method | Endpoint | Roles | Notes |
 |---|---|---|---|
@@ -193,9 +193,9 @@ _Status: auth + `/bot/ask` gating landed Phase 4.1a; `/me/*`, `/versions`, `/adm
 | `GET` | `/healthz` | Public | Liveness probe. _(implemented Phase 1.3)_ |
 | `POST` | `/bot/ask` | Player (**access JWT**) | Send `{message, state, session_id?}`; returns `{answer, source_chunks, routing, session_id}`. **Phase 4.1b:** the service resolves/creates the session, runs routing, and records the turn (Postgres under RLS + Redis) via the two-short-transactions pattern. Gated by the access-JWT dependency (4.1a). Router 3.1, agent 3.2, class detection 3.3. |
 | _(dropped)_ | ~~`/client/token`~~ | — | **Removed (D-027/D-029):** the access+refresh split makes the mod's saved-token exchange identical to `/auth/refresh`; folded in there. |
-| `GET` | `/versions` | Player | List available wiki corpus versions. |
-| `GET` | `/me/preferences` | Player | Read own preferences (incl. selected version). |
-| `PATCH` | `/me/preferences` | Player | Update preferences. |
+| `GET` | `/versions` | **Public** | List the shared corpus's distinct `game_version` values (D-005 — shared corpus metadata, not tenant data, so no token; powers the portal dropdown). **Implemented Phase 5.1.** |
+| `GET` | `/me/preferences` | Player (**access JWT**) | Read own preferences; **RLS-scoped** via the `tenant_preferences` table (fail-closed policy, D-011 revision / Option 2). **Implemented Phase 5.1.** _(stored `selected_version` is NOT yet consumed by `/bot/ask` retrieval — P-017.)_ |
+| `PATCH` | `/me/preferences` | Player (**access JWT**) | Upsert own preferences (RLS-scoped). **Implemented Phase 5.1.** |
 | `DELETE` | `/me` | Player (access JWT) | **Conversation/data erasure (D-032), implemented Phase 4.1b** — purges the tenant's `messages`/`sessions` (RLS-scoped DELETE) + Redis history keys + a `tenant.erased` audit row. **Keeps the account row** (full account/email deletion → P-015). |
 | `GET` | `/admin/versions/check` | operator | Check whether the live wiki has a newer version than the latest stored snapshot. |
 | `POST` | `/admin/rerag` | operator | Trigger a re-rag (snapshot + embed) as a background job (button is stretch; script is must-have). |
@@ -398,13 +398,15 @@ Operator / test bench on `localhost:8501`. Pages:
 
 ### 13.2 React Config Portal (`frontend-user/`)
 
-Player-facing **configuration** surface, built with Vite. **No chat.** Kept minimal (forms) so it can degrade to a Streamlit page if the clock tightens (D-011). Screens:
-- **Login / Register / Continue as guest.**
-- **Version** — dropdown of available corpora + "check for new version".
-- **Preferences** — selected version + any per-tenant settings.
-- **Account** — right-to-erasure button (`DELETE /me`).
+Player-facing **configuration** surface — Vite + React + TypeScript, a **polished** demo surface (D-011 revision). **No chat. Implemented Phase 5.1.** Screens:
+- **Login / Register / Continue as guest** — JWT pair stored client-side (localStorage, **token-only — no password**); Bearer on authed calls; `401 → POST /auth/refresh + retry`, else re-login (guests are access-only, no refresh).
+- **Version** — dropdown from `GET /versions` (public, shared corpus metadata).
+- **Preferences** — `GET`/`PATCH /me/preferences` (selected version); persists across reload. _(stored `selected_version` not yet consumed by `/bot/ask` retrieval — P-017.)_
+- **Account** — right-to-erasure button (`DELETE /me`) behind a confirm step (D-032).
 
-Auth: Bearer JWT from `/auth/jwt/login` or `/auth/guest`, stored client-side.
+Auth: Bearer JWT from `/auth/jwt/login` or `/auth/guest`, stored client-side. Served as a static bundle (nginx) on `:5173` (compose `frontend-user`); the API base is baked at build time (`VITE_API_BASE_URL`, default `http://localhost:8000`) and CORS for this origin is configured backend-side (locked allow-list, never `*`). The design-token SKILL was unavailable in the build env → standard React/CSS defaults.
+
+**Two clients, two logins (design choice):** the portal and the game-client mod are **separate clients with separate logins** — the portal's JWT lives in the **browser** (`localStorage`), the mod's in **`token.json`** (D-027). Logging into one does **not** log into the other; a player authenticates **once per client**. **Guest is portal-only** — the mod's `/bot login` is real-account only (no guest path). Erasure (`DELETE /me`) is hidden for guest sessions (a guest has no persisted data to delete).
 
 ### 13.3 Game Client (`client/`) — production chat surface
 

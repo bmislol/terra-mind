@@ -115,3 +115,22 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class TenantPreferences(Base):
+    # Per-tenant config (D-011 revision, Phase 5.1). RLS-scoped fail-closed like
+    # sessions/messages (see the tenant_preferences migration). A SEPARATE table,
+    # not a tenants column, so the pre-auth tenants lookups stay un-RLS'd.
+    __tablename__ = "tenant_preferences"
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    preferences: Mapped[dict[str, object]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

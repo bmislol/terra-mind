@@ -589,15 +589,37 @@ not CI** (ARCH §13.3) — 7 `/bot test` runs against a live character via
 ---
 
 ## Section 5 — Web Surfaces (Days 9–11)
-> _Outline — expand when reached. Keep the portal minimal (D-011)._
+
+Goal: the two web surfaces over the proven backend — the React **config** portal (player account management, NOT chat — D-011) and the Streamlit operator/test bench (corpus/version admin + the test chat that's the demo fallback if the live game breaks, RUNBOOK §7.1). Both are mostly FRONTEND WIRING to already-built, CI-green endpoints from Section 4 — the main risks are CORS, browser token handling, and admin endpoints that may not exist yet (audit first).
+
+> **D-011 revised (Section 5):** the React portal is upgraded from "minimal forms, may degrade to Streamlit" to a **polished** demo surface — conscious override, scope cost accepted, logged in DECISIONS. Guardrail: polished means clean/consistent/presentable, NOT a CSS rabbit-hole. Timebox the styling; if it starts eating Section-6 time, stop at "presentable." The grade is in Sections 6-7 (the evals), not the portal's pixels.
 
 ### Phase 5.1 · React config portal — `feat/20-frontend-user`
-- Goal: login/register/guest, version dropdown + check, preferences, right-to-erasure button. No chat.
-- Touches: `frontend-user/`, `ARCH.md §13.2`. Done-when: a player can register, pick a version, set prefs, request erasure.
+Player-facing CONFIG surface (D-011). No chat. Vite + React. Polished (D-011 revision). Wires endpoints already built + CI-green in Section 4.
 
-### Phase 5.2 · Streamlit admin — `feat/21-frontend-admin`
-- Goal: operator login, corpus/version mgmt + re-rag trigger, tenant view, test chat over `/bot/ask`.
-- Touches: `frontend-admin/`, `ARCH.md §13.1`. Done-when: full agent path demoable without launching Terraria.
+- [x] **Endpoint reality check (Part A):** confirmed against the routers — `/auth/register`, `/auth/jwt/login` (form), `/auth/guest`, `DELETE /me` exist; **`/versions` and `/me/preferences` did NOT** → built them (build-now per the audit).
+- [x] **CORS (Part A):** the API had no CORS middleware (the mod was C#, no browser). Added a **locked-origin** allow-list — `add_cors`, origin from env (default localhost:5173), **never `*`** (rejected in code + tested).
+- [x] `frontend-user/` scaffold: Vite + React + TypeScript, single bundle (`tsc && vite build` green). Deps react/react-dom/vite + dev @vitejs/plugin-react/typescript/@types — justified in LICENSES §6 (dev-only).
+- [x] **Auth:** login / register / continue-as-guest; access+refresh pair in `localStorage` (**token-only, no password**); Bearer on authed calls; **401 → `/auth/refresh` + retry**, else re-login (guests access-only).
+- [x] **Version:** dropdown from `GET /versions` (public corpus metadata; one version now — `1.4.4.9`).
+- [x] **Preferences:** GET on load + PATCH on save (incl. selected version); reflects saved state; **persists across reload** (verified in-browser).
+- [x] **Account / erasure:** `DELETE /me` behind a confirm step (destructive, D-032); success state. **Hidden for guests** (no persisted data); preferences **retained** (D-032 extended).
+- [x] **Polish (timeboxed):** clean dark layout, labeled forms, loading states, readable errors (parsed `detail`, not raw JSON), basic responsive. Stopped at clean. **`localStorage` = token only**; all else React state. _(Design-token SKILL unavailable → standard defaults.)_
+- [x] **Compose:** `frontend-user` builds (node → nginx) on `:5173`, `depends_on api: service_healthy` (api `start_period` bumped 5s→150s for a clean cold `up`).
+- [x] **Manual verify (done-when):** verified in-browser — register → version → prefs persist across a HARD reload → erasure (data gone + logged out; re-login shows prefs survived); guest path works.
+- [x] CI green: backend **255 tests** (ruff/format/mypy/pytest) incl. CORS + RLS-prefs isolation; portal builds clean (no frontend CI wired). `ARCH.md §13.2`, `LICENSES.md §6`, D-011 revision + P-017 + D-032 extension in `DECISIONS.md`. **5.1 done.**
+
+### Phase 5.2 · Streamlit operator/test bench — `feat/21-frontend-admin`
+Operator surface + THE DEMO FALLBACK (RUNBOOK §7.1). Full-parity test chat is the priority (exercises the exact /bot/ask path without Terraria).
+
+- [ ] **Admin-endpoint AUDIT first (your call):** check which `/admin/*` actually exist + are tested — `/admin/versions/check`, `/admin/rerag`, `/admin/tenants`, `/admin/audit-log`. Scope the admin UI to what's REAL; flag any missing as explicit deferrals (don't build UI against a 404, don't silently build the missing endpoints — log the gap and decide per-endpoint).
+- [ ] **Operator login:** Streamlit page → `/auth/jwt/login`; gate the admin pages behind an operator (is_superuser) token; non-operator → blocked. (First operator bootstrapped via RUNBOOK §3 script.)
+- [ ] **TEST CHAT (priority — the demo fallback):** hand-enter (or pick a preset) a StatePayload + a question → POST `/bot/ask` → render the answer + show the routing (faq/agent) + session_id. This exercises the FULL pipeline (router → agent/RAG → response) WITHOUT Terraria. Include a couple of preset payloads (e.g. a melee pre-boss, a ranger loadout) so the demo is one click. May stream for dev convenience (ARCH §13.1). This is what you fall back to if the game won't launch.
+- [ ] **Corpus & Versions** (scoped to audited endpoints): list stored versions + manifest counts; "check for new version"; trigger re-rag (if `/admin/rerag` exists — else deferred, the SCRIPT is the must-have per ARCH §10).
+- [ ] **Tenants / audit:** read-only tenant list (`/admin/tenants`) + audit-log view (`/admin/audit-log`) — if they exist; else flag.
+- [ ] **Compose:** `frontend-admin` service on :8501; `docker compose up` → admin loads.
+- [ ] **Manual verify (the done-when):** operator login → test chat with a preset payload → full agent answer renders with routing shown (the whole path, no game). Corpus/tenant views load for what's built. Capture for the PR + as a demo-fallback artifact.
+- [ ] CI green. `ARCH.md §13.1`, RUNBOOK §7.1 (the fallback procedure) + §3 (operator bootstrap). Tick 5.2.
 
 ---
 

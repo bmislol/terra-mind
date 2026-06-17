@@ -99,7 +99,8 @@ async def app_session_factory(
     """
     with psycopg.connect(_pg.owner_sync_dsn, autocommit=True) as conn:
         conn.execute(
-            "TRUNCATE tenants, sessions, messages, audit_log RESTART IDENTITY CASCADE"
+            "TRUNCATE tenants, sessions, messages, audit_log, rag_chunks,"
+            " tenant_preferences RESTART IDENTITY CASCADE"
         )
     engine = create_async_engine(_pg.app_async_dsn)
     factory = async_sessionmaker(engine, expire_on_commit=False)
