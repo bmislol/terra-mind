@@ -8,6 +8,7 @@ configure_logging()
 
 from fastapi import FastAPI  # noqa: E402
 
+from app.api.admin import admin_router  # noqa: E402
 from app.api.auth import auth_router  # noqa: E402
 from app.api.bot import bot_router  # noqa: E402
 from app.api.me import me_router  # noqa: E402
@@ -29,6 +30,7 @@ _cors_origins = [
 ]
 app.add_middleware(RequestContextMiddleware)
 add_cors(app, _cors_origins)
+app.include_router(admin_router)
 app.include_router(auth_router)
 app.include_router(bot_router)
 app.include_router(me_router)

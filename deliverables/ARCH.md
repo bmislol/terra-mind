@@ -181,7 +181,7 @@ First operator is bootstrapped via a script (RUNBOOK §3).
 
 ## 7. Endpoint Inventory
 
-_Status: auth + `/bot/ask` gating landed Phase 4.1a; `/versions` + `/me/preferences` (GET/PATCH) landed **Phase 5.1**, plus a **locked-origin CORS allow-list** for the browser portal (never `*`); `/admin/*` pending Phase 5.2. Phase tags in Notes column._
+_Status: auth + `/bot/ask` gating landed Phase 4.1a; `/versions` + `/me/preferences` (GET/PATCH) landed **Phase 5.1** (+ a locked-origin CORS allow-list, never `*`); `/admin/tenants` + `/admin/audit-log` landed **Phase 5.2** (`/admin/versions/check` + `/admin/rerag` deferred — P-018/P-019). Phase tags in Notes column._
 
 | Method | Endpoint | Roles | Notes |
 |---|---|---|---|
@@ -197,10 +197,10 @@ _Status: auth + `/bot/ask` gating landed Phase 4.1a; `/versions` + `/me/preferen
 | `GET` | `/me/preferences` | Player (**access JWT**) | Read own preferences; **RLS-scoped** via the `tenant_preferences` table (fail-closed policy, D-011 revision / Option 2). **Implemented Phase 5.1.** _(stored `selected_version` is NOT yet consumed by `/bot/ask` retrieval — P-017.)_ |
 | `PATCH` | `/me/preferences` | Player (**access JWT**) | Upsert own preferences (RLS-scoped). **Implemented Phase 5.1.** |
 | `DELETE` | `/me` | Player (access JWT) | **Conversation/data erasure (D-032), implemented Phase 4.1b** — purges the tenant's `messages`/`sessions` (RLS-scoped DELETE) + Redis history keys + a `tenant.erased` audit row. **Keeps the account row** (full account/email deletion → P-015). |
-| `GET` | `/admin/versions/check` | operator | Check whether the live wiki has a newer version than the latest stored snapshot. |
-| `POST` | `/admin/rerag` | operator | Trigger a re-rag (snapshot + embed) as a background job (button is stretch; script is must-have). |
-| `GET` | `/admin/tenants` | operator | List tenants. |
-| `GET` | `/admin/audit-log` | operator | Audit log (erasure + re-rag events). |
+| `GET` | `/admin/tenants` | operator (**`require_operator`**) | List all tenants (id/email/is_guest/created_at). **Cross-tenant** read, NOT RLS-scoped — `tenants` has no RLS (D-017); the gate is the control. **Implemented Phase 5.2.** |
+| `GET` | `/admin/audit-log` | operator (**`require_operator`**) | Recent audit events (`tenant.erased`/`auth.login`/`session.revoked`, SECURITY §6). Cross-tenant read of the non-RLS `audit_log` (D-017). **Implemented Phase 5.2.** |
+| `GET` | `/admin/versions/check` | operator | Newer-than-stored wiki check. **Deferred (P-018)** — live-wiki compare, ~zero demo value; the admin view lists stored versions via `GET /versions`. |
+| `POST` | `/admin/rerag` | operator | Trigger re-rag as a background job. **Deferred (P-019)** — `scripts/build_corpus.py` is the must-have (ARCH §10); the button is stretch. |
 
 ## 8. Memory Plan
 
