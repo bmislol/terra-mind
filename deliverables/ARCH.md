@@ -390,11 +390,12 @@ Structured JSON via `app/core/logging.py::JSONFormatter`:
 
 ### 13.1 Streamlit Admin (`frontend-admin/`)
 
-Operator / test bench on `localhost:8501`. Pages:
-- **Login** — operator JWT login.
-- **Corpus & Versions** — list stored versions, run "check for new version", trigger re-rag, view manifest + counts.
-- **Tenants** — read-only tenant list, audit-log view.
-- **Test Chat** — exercises the `/bot/ask` flow with a hand-entered or mocked state payload, so the full agent path is demoable without launching Terraria. May stream for dev convenience.
+Operator / test bench on `localhost:8501` (Streamlit). **Implemented Phase 5.2.** Operator-gated — a player token logs in but is blocked from the bench (the real gate is the backend `require_operator` → 403; the UI just hides it). All API calls are **server-side** (httpx from the Streamlit process) → **no CORS** (not a browser origin). Tabs:
+- **Test chat (centerpiece, the demo fallback — RUNBOOK §7.1):** pick a **preset** `StatePayload` (melee pre-boss / ranger post-EoC / mage hardmode — real `item_id`s where confident, D-026) + a question → `POST /bot/ask` → renders the **answer**, **routing** (faq/agent), session_id, and the raw payload sent. The full router → agent/RAG path, no Terraria.
+- **Versions** — stored corpus versions via `GET /versions` (+ a note that re-rag is `scripts/build_corpus.py`, not a button — P-019).
+- **Tenants** + **Audit log** — the operator views `GET /admin/tenants` + `GET /admin/audit-log` (cross-tenant, `require_operator`-gated; not RLS-scoped — D-017).
+
+`/admin/versions/check` (P-018) and the `/admin/rerag` button (P-019) are deferred — the `build_corpus.py` script is the must-have (ARCH §10).
 
 ### 13.2 React Config Portal (`frontend-user/`)
 

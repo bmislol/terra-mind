@@ -223,7 +223,7 @@ _(Filled in Phase 7.2 as a numbered click-through.)_ Target order:
 8. Eval gates: show `eval_thresholds.yaml`, the last RAG run, and a deliberate red CI run fixed to green.
 
 ### 7.1 Fallback if the live game demo breaks
-Use the **Streamlit admin test chat** to exercise the exact `/bot/ask` path with a hand-entered state payload — the full router → agent → RAG path runs without launching Terraria.
+The **Streamlit admin test chat** (`frontend-admin/`, `:8501`) exercises the exact `/bot/ask` path without Terraria — the full router → agent/RAG → answer, with the **routing** shown. Procedure: bring up the stack (`docker compose up -d --build api frontend-admin`), bootstrap an operator (§3) if you don't have one, open `http://localhost:8501`, log in as the operator, pick a **preset** character state (melee / ranger / mage), and **Ask** — the answer + routing + session_id render, with the raw `StatePayload` visible so the audience sees what state produced the answer. One-click presets make this a fast, deterministic fallback.
 
 ### 7.2 Smoke test: POST /bot/ask (Phase 3.1+; auth-gated since 4.1a)
 
