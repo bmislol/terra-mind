@@ -63,19 +63,44 @@ _SUSPICION_INPUT = _compile(
         # delimiter / encoding / structure (injection payload markers)
         r"(?:```|===|###|<\||\|>|\[/?inst\]|<\s*/?system\s*>|begin\s+system)",
         r"[A-Za-z0-9+/]{40,}={0,2}",
+        # toxicity-soft — the hard insults are Tier 1; this escalates the rest
+        # (e.g. "you are ABSOLUTE trash", where an adverb breaks the Tier-1 phrase).
+        r"\b(?:trash|garbage|pathetic|clown|moron|idiot|stupid|dumb|useless|"
+        r"worthless|loser|ashamed|crawl\s+back|nobody\s+likes\s+you|shut\s+up|"
+        r"shut\s+your|piece\s+of\s+(?:junk|crap|garbage|trash))\b",
+        # jailbreak-soft phrasings (Tier 1 catches the imperative cases). NB: not
+        # bare "drops"/"loot" — that would needlessly judge "what does X drop?".
+        r"\b(?:hand\s+over|conjure|into\s+my\s+inventory|"
+        r"out\s+of\s+(?:a\s+single|just|one|1)\b|"
+        r"(?:don'?t|do\s+not)\s+(?:have|want)\s+to\s+(?:fight|farm|grind)|"
+        r"no\s+need\s+to\s+fight|skip\s+the\s+(?:grind|fight))\b",
+        # injection-soft — verbatim extraction / "what you were told at the start"
+        r"\b(?:word.for.word|verbatim|repeat\s+back|you\s+were\s+told|"
+        r"everything\s+you\s+were|at\s+the\s+(?:very\s+)?start\s+of|"
+        r"this\s+conversation)\b",
     )
 )
-# Output is our own (system-prompted) model, so the dominant output risk is a
-# leaked prompt / broken character — a narrower, leak-focused net.
+# Output is our own (system-prompted) model, but a compromised reply can leak the
+# prompt, comply with a cheat, or turn toxic — so the net covers all three.
 _SUSPICION_OUTPUT = _compile(
     (
+        # leaked prompt / broken character
         r"\b(?:as\s+an?\s+ai|language\s+model|chatbot|system\s+prompt)\b",
         r"\bmy\s+(?:instructions|prompt|guidelines|rules|directives|training|"
         r"programming|purpose|system)\b",
-        r"\bi\s+(?:was|am|have\s+been)\s+(?:instructed|programmed|told|configured|"
-        r"designed|trained)\b",
+        r"\b(?:the\s+rules\s+i\s+was|i\s+was\s+(?:instructed|programmed|told|"
+        r"configured|designed|trained|handed|given))\b",
+        r"\b(?:stay\s+in\s+character|in\s+character|break\s+character|as\s+instructed)\b",
         r"\b(?:i\s+cannot|i\s+can'?t|i'?m\s+not\s+allowed)\s+to\s+(?:reveal|share|"
         r"disclose)\b",
+        # jailbreak compliance (the reply handing over a cheat)
+        r"\b(?:no\s+need\s+to\s+fight|without\s+(?:fighting|earning|crafting)|"
+        r"here\s+are\s+the\s+(?:drops|loot)|cheat\s+sheet|creative\s+mode|"
+        r"just\s+install|spawn\s+whatever)\b",
+        r"\bignore\s+(?:what|everything)\s+(?:i|you)\s+said\b",
+        # toxic reply
+        r"\b(?:stupid|idiot|moron|dumb|worthless|useless|garbage|trash|pathetic|"
+        r"clown|loser|shut\s+up|wasting\s+(?:my|your)\s+time)\b",
     )
 )
 

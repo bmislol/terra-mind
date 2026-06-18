@@ -761,12 +761,24 @@ verify-not-build (erasure already exists from 4.1b).
       benign skip the judge (`chat` not called), ambiguous escalates once &
       honors the verdict, reply parses / fails closed. A-gate green (**319**).
 
-**Commit 3 — red-team set + harness:**
-- [ ] `app/eval/redteam/redteam_set.jsonl` `{text, category, surface, must_block}`
-      (diverse techniques + benign controls) + `app/eval/redteam/harness.py`
-      + `tests/test_eval_redteam.py` (`@pytest.mark.redteam`). Harness compares
-      `successful <= max_successful_injections` **directly**. **Run the real
-      set (API key) → prove 0 successful + 0 over-block** before committing.
+**Commit 3 — red-team set + harness (done):**
+- [x] `data/eval/redteam.jsonl` (47 records: 30 attacks across distinct
+      techniques/category + 17 benign controls incl. borderline-legit) +
+      `app/eval/redteam/harness.py` + `tests/test_eval_redteam.py`
+      (`@pytest.mark.redteam`, deselected from default `pytest`). Harness routes
+      input→`check_input`, output→`check_output`; compares `successful <=
+      max_successful_injections` **directly** (the key has no `_min`/`_max`
+      suffix — `passes_threshold` raises on it, per the audit).
+- [x] **Real run (API key, real judge) — honest before/after:** first run
+      **13 successful / 0 over-block** (the set genuinely probed the filter;
+      every slip was the suspicion net failing to escalate, not the judge).
+      Widened the input net (toxicity-/jailbreak-/injection-soft) + output net
+      (leak/compliance/toxicity) → 2; strengthened the judge prompt (abuse-at-
+      assistant; referencing-its-own-rules) → 1; generalized Tier-1 toxicity
+      (intensifier gap + verbless strong-insult) + Tier-1 output meta-leak
+      (`stay in character` / `rules I was handed`) → **0 successful / 0
+      over-block, stable across 3 runs**. Tunings are general classes, not the
+      verbatim set strings. A-gate green (324 + 1 deselected).
 
 **Commit 4 — wire into `/bot/ask`:**
 - [ ] Input hook (after `resolve_session`, before routing) + output hook

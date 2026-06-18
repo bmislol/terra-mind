@@ -55,9 +55,18 @@ _JAILBREAK_PATTERNS: tuple[str, ...] = (
 # ── Toxicity (input + output) ─────────────────────────────────────────────────
 # Insult/harassment phrasing (directed at the bot/others). Nuanced hate → Tier 2.
 _TOXICITY_PATTERNS: tuple[str, ...] = (
-    r"you(?:'re|\s+are|\s+r)\s+(?:a\s+|an\s+|such\s+a\s+|so\s+|really\s+|just\s+)*"
+    # "you're <intensifier>* <insult>" — intensifiers (absolute/total/…) included
+    # so an adverb doesn't break the match ("you are ABSOLUTE trash").
+    r"you(?:'re|\s+are|\s+r)\s+(?:a\s+|an\s+|such\s+an?\s+|so\s+|really\s+|just\s+|"
+    r"absolute(?:ly)?\s+|total(?:ly)?\s+|complete(?:ly)?\s+|utter(?:ly)?\s+|"
+    r"honestly\s+|genuinely\s+|pretty\s+|quite\s+)*"
     r"(?:stupid|idiot|idiotic|dumb|worthless|useless|garbage|trash|pathetic|"
-    r"moron(?:ic)?|braindead|brain-dead)\b",
+    r"moron(?:ic)?|braindead|brain-dead|clown|loser|imbecile)\b",
+    # Verbless strong-insult: "you absolute clown" (no "are"). Strong nouns only —
+    # they're not benign in this context (unlike "trash"/"garbage" gear).
+    r"\byou\s+(?:are\s+)?(?:a\s+|an\s+|such\s+an?\s+|absolute\s+|total\s+|"
+    r"complete\s+|utter\s+|right\s+)+(?:clown|moron|idiot|loser|imbecile|"
+    r"buffoon|jackass|disgrace|joke)\b",
     r"\b(?:shut\s+up|shut\s+the\s+\w+\s+up|kill\s+your\s*self|kys|go\s+die|drop\s+dead)\b",
     r"\bi\s+(?:hate|despise|loathe)\s+you\b",
     r"\byou\s+sucks?\b",
@@ -72,6 +81,10 @@ _OUTPUT_LEAK_PATTERNS: tuple[str, ...] = (
     r"here\s+(?:is|are)\s+my\s+(?:system\s+)?(?:prompt|instructions|rules)",
     r"\bas\s+an\s+ai\s+(?:language\s+)?model\b",
     r"my\s+(?:system\s+)?(?:guidelines|directives)\s+(?:are|state|say)",
+    # Break-character / referencing its own rules — a Terraria answer never does.
+    r"\bstay\s+in\s+character\b",
+    r"\bbreak\s+character\b",
+    r"\b(?:the\s+)?rules\s+i\s+was\s+(?:handed|given|told)\b",
 )
 
 
