@@ -716,19 +716,118 @@ Operator surface + THE DEMO FALLBACK (RUNBOOK §7.1). Full-parity test chat is t
 ---
 
 ## Section 6 — Security, Guardrails & CI (Days 11–12)
-> _Outline — expand when reached._
 
-### Phase 6.1 · Guardrails + red-team — `feat/22-guardrails`
-- Goal: input/output filter (deterministic + LLM-judge) vs injection / "give me dev items" / toxicity; red-team set (graduate P-006).
-- Touches: `app/guardrails/`, `data/eval/`, `SECURITY.md`. Done-when: red-team set passes (0 successful injections).
+Goal: the graded core — guardrails that block misuse, a red-team set that
+proves it (0 successful injections), and CI eval gates that turn a
+regression RED. This is where Project Rule 4 ("the evals are the grade")
+is satisfied, and where P-006 (guardrail/red-team set) + P-016's broad
+measurement land. Mostly NEW backend (guardrails) + CI wiring; 6.2 is
+verify-not-build (erasure already exists from 4.1b).
 
-### Phase 6.2 · Right-to-erasure end-to-end — `feat/23-erasure`
-- Goal: `DELETE /me` purges Postgres rows + Redis session; audit-logged.
-- Touches: `app/api`, `app/services`, `SECURITY.md`. Done-when: erasure verified empty + audit row written.
+### Phase 6.1 · Guardrails + red-team set — `feat/24-guardrails`
+> **The graded core (Project Rule 4).** Resolves P-006 → **D-034**:
+> **deterministic-first** guardrail (Tier-1 regex, zero-LLM common path) +
+> an **escalation LLM-judge** (haiku, ambiguous band only — not every
+> turn, D-003) on both `/bot/ask` surfaces; 3 categories (prompt injection
+> / game-jailbreak / toxicity); block → generic refusal + `guardrail.blocked`
+> audit (D-017). Red-team set keyed on **adversarial diversity** + benign
+> controls; gate `redteam.max_successful_injections: 0` (harness compares
+> **directly** — the key has no `_min`/`_max` suffix, by design). **5 staged
+> commits.**
 
-### Phase 6.3 · CI eval gates green — `feat/24-ci-eval-gates`
-- Goal: `eval-redteam.yml` (PR-triggered, no DB) red on injection success; `eval-rag.yml` thresholds enforced; both green on `main`.
-- Touches: `.github/workflows/`, `EVALS.md`. Done-when: a regression turns CI red on purpose, then green when fixed.
+**Plan-first (done):**
+- [x] **P-006 → D-034** in DECISIONS (architecture + accepted-coverage-risk-
+      mitigated-by-the-gate reasoning).
+
+**Commit 1 — deterministic core (done):**
+- [x] `app/guardrails/`: domain (`Verdict{blocked, category, reason}`,
+      `Category` enum, the player-facing refusal constant) + per-category
+      Tier-1 rule sets + `check_input_deterministic` /
+      `check_output_deterministic` (regex, **zero LLM**).
+- [x] Fast unit tests, **no LLM**: each category's obvious cases BLOCK, and
+      the **benign-passes** cases PASS (over-block guard from the start —
+      "beat the Moon Lord" / "what does Zenith drop" / "get dev items
+      legitimately"). Tier-1 tuned for **precision** (recall → Tier 2).
+- [x] A-gate green.
+
+**Commit 2 — LLM-judge + escalation (done):**
+- [x] `app/guardrails/judge.py` (reuses `AnthropicClient`, haiku, **fail-
+      closed** on error/garbage) + `app/prompts/guardrail_judge.md` (loaded
+      in lifespan; **refuse-to-boot** if absent) + `check_input`/`check_output`:
+      deterministic hard-block / clear-benign short-circuit (no LLM), only
+      the **suspicion net** escalates to the judge. The net errs **broad**
+      (favor escalating); its coverage is tuned by commit 3's red-team gate.
+- [x] Unit tests with a **mocked** judge (no real LLM): hard-block & clear-
+      benign skip the judge (`chat` not called), ambiguous escalates once &
+      honors the verdict, reply parses / fails closed. A-gate green (**319**).
+
+**Commit 3 — red-team set + harness (done):**
+- [x] `data/eval/redteam.jsonl` (47 records: 30 attacks across distinct
+      techniques/category + 17 benign controls incl. borderline-legit) +
+      `app/eval/redteam/harness.py` + `tests/test_eval_redteam.py`
+      (`@pytest.mark.redteam`, deselected from default `pytest`). Harness routes
+      input→`check_input`, output→`check_output`; compares `successful <=
+      max_successful_injections` **directly** (the key has no `_min`/`_max`
+      suffix — `passes_threshold` raises on it, per the audit).
+- [x] **Real run (API key, real judge) — honest before/after:** first run
+      **13 successful / 0 over-block** (the set genuinely probed the filter;
+      every slip was the suspicion net failing to escalate, not the judge).
+      Widened the input net (toxicity-/jailbreak-/injection-soft) + output net
+      (leak/compliance/toxicity) → 2; strengthened the judge prompt (abuse-at-
+      assistant; referencing-its-own-rules) → 1; generalized Tier-1 toxicity
+      (intensifier gap + verbless strong-insult) + Tier-1 output meta-leak
+      (`stay in character` / `rules I was handed`) → **0 successful / 0
+      over-block, stable across 3 runs**. Tunings are general classes, not the
+      verbatim set strings. A-gate green (324 + 1 deselected).
+
+**Commit 4 — wire into `/bot/ask` + close 6.1 (done):**
+- [x] Input hook (after `resolve_session`, before routing — ARCH §5 step 4) +
+      output hook (before `record_turn`/return — step 9), via a thin
+      `app/services/guardrails.py` (keeps the LLM-judge call in the service
+      layer). Block → generic refusal + `guardrail.blocked` audit
+      (operator/cross-tenant, no RLS — D-017); input-block skips routing+answer.
+- [x] Integration tests (mocked judge): attack → blocked, **router never
+      called**, audited; benign → passes through (routing=faq); leaking output
+      → replaced with the refusal + audited. **327 tests** (+3), 1 deselected.
+- [x] Closeout: `SECURITY.md §8` (two tiers + gate + the self-validation
+      argument), `EVALS.md §2` (set at `data/eval/redteam.jsonl` + the 13→0
+      convergence table), `eval-redteam.yml` paths extended (set + judge prompt;
+      needs the `ANTHROPIC_API_KEY` secret), Checklist 6.1, CLAUDE §2.
+      **6.1 done — the graded core: real red-team gate at 0 successful.**
+
+### Phase 6.2 · Right-to-erasure — VERIFY end-to-end — `feat/25-erasure`
+> **Mostly built already** (4.1b: `DELETE /me` purges Postgres + Redis,
+> audit-logged, owner-connection physical-deletion test; 5.1/D-032:
+> retains preferences). This phase = prove it end-to-end as a live demo +
+> close any gap, NOT rebuild it.
+- [ ] Verify `DELETE /me` end-to-end live: a tenant with sessions +
+      messages + Redis session + prefs → erase → conversation rows gone
+      (owner-connection check), Redis session cleared, `tenant.erased`
+      audit row written, prefs retained (D-032).
+- [ ] Confirm the existing `test_erasure.py` covers it; add any missing
+      assertion (Redis-cleared, audit-written) if not already there.
+- [ ] Demo path: erasure via the React portal button (5.1) → show the
+      rows gone + audit row (the brief's "delete my data" demo).
+- [ ] `SECURITY.md §6/§7` reflects the proven flow. Tick 6.2.
+
+### Phase 6.3 · CI eval gates green — `feat/26-ci-eval-gates`
+- [ ] **`eval-redteam.yml`** (PR-triggered, no DB — exercises the
+      guardrail filter on inputs/outputs): RED on any successful
+      injection, green at 0. Runs on PRs touching `app/guardrails/`, the
+      red-team set, or the guardrail prompts.
+- [ ] **`eval-rag.yml`** (manual-dispatch, needs the live corpus DB):
+      enforces the `eval_thresholds.yaml` hit@k / MRR floors; a
+      regression below threshold fails the job.
+- [ ] **Prove the gate works**: deliberately introduce a regression
+      (a guardrail bypass / a threshold miss) → CI turns RED → fix → green.
+      This is the "a regression must turn the build red" requirement,
+      demonstrated.
+- [ ] **P-016 broad measurement** (deferred from 4.4): measure the
+      agent-grounding fix across the RAG golden set / progression
+      questions (not just the in-game n≈5) — record whether it
+      helps/regresses, as a number. Lands here with the eval harness.
+- [ ] CI green on `main`; `EVALS.md` (both gates + the regression proof),
+      final numbers table started. Tick 6.3 → Section 6 complete.
 
 ---
 

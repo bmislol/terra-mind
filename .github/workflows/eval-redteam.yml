@@ -12,6 +12,8 @@ on:
     paths:
       - 'backend/app/guardrails/**'
       - 'backend/app/eval/redteam/**'
+      - 'backend/data/eval/redteam.jsonl'
+      - 'backend/app/prompts/guardrail_judge.md'
       - 'backend/tests/test_eval_redteam.py'
   workflow_dispatch:
 

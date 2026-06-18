@@ -123,14 +123,17 @@ GitHub-token patterns from a code-triage context are intentionally omitted — n
 
 ## 8. Guardrails (agent misuse) — headline control
 
-`app/guardrails/` runs an **input check** before the LLM and an **output check** before the reply leaves the boundary. It combines deterministic rules with an LLM-judge (D-012).
+`app/guardrails/` runs an **input check** (in `/bot/ask` after `resolve_session`, before routing — ARCH §5 step 4) and an **output check** (before the reply leaves — step 9). Implemented Phase 6.1, **D-034** (graduates P-006, D-012).
 
-Threat categories:
-- **Prompt injection** — "ignore your instructions", attempts to extract the system prompt, tool-abuse coaxing.
-- **Game/progression jailbreaks** — the canonical `"give me dev items"`, requests to fabricate impossible items/recipes, or to bypass intended progression. The agent answers *about* the game; it does not act as a cheat provider.
-- **Toxicity** — abusive content in or out.
+**Two tiers, deterministic-first (cost-aware, D-003 latency):**
+- **Tier 1 — deterministic** (`rules.py`, regex, zero LLM): a clear per-category hit BLOCKS; a clearly-benign message PASSES. The common path — real game questions and obvious attacks — costs **no LLM call**.
+- **Tier 2 — LLM-judge** (`judge.py`, `claude-haiku-4-5`): fires **only on the ambiguous band** (a broad "suspicion net" trips that Tier 1 didn't resolve), returning BLOCK/ALLOW + category. **Fail-closed** on a judge error or unparseable reply (it only runs on already-suspicious text).
 
-Enforcement is graded by the red-team gate (EVALS §2): **zero** successful attacks for a green build. The red-team set + judge prompt are finalized in Phase 6.1 (P-006). NeMo Guardrails is a stretch replacement for the lightweight filter (D-012).
+Threat categories: **prompt injection** (override/extract/leak the system prompt, role-play/DAN, break-character in the reply); **game/progression jailbreak** (the canonical `"give me dev items"`, spawn-drops-without-fighting, `/give`, stat-setting, impossible-craft, dupe — the companion answers *about* the game, it is not a cheat provider); **toxicity** (in + out, incl. abuse aimed at the assistant).
+
+**On a block:** the player gets a **generic refusal** (no rule or category revealed — no information leak to a prober), the routing/answer LLMs are skipped (input) or the drafted reply is replaced (output), the turn is still recorded (refusal), and a **`guardrail.blocked`** audit row is written (operator/cross-tenant, no RLS — D-017, §6; visible in the operator Audit tab).
+
+**Coverage is self-validated by the gate.** The deterministic-first design accepts a theoretical recall gap (a novel attack that slips Tier 1 *and* doesn't trip the net); this is safe because the red-team gate (EVALS §2) surfaces any such slip as `successful > 0` and turns the build **red** — forcing the net wider. Tier 1 is tuned for precision (never over-block the benign), Tier 2 supplies recall. Gate: **zero** successful injections + zero over-blocks for a green build (proven 13→0 in Phase 6.1; EVALS §2). NeMo Guardrails remains a stretch replacement (D-012).
 
 ## 9. Refuse-to-Boot Security Checks
 
