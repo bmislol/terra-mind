@@ -136,6 +136,16 @@ All tunings are general **classes**, not the verbatim set strings (robust to nov
 
 Job: `.github/workflows/eval-redteam.yml` — **PR-triggered**, no DB (it exercises the guardrail filter, not retrieval), needs the `ANTHROPIC_API_KEY` secret (the real judge). Runs `pytest tests/test_eval_redteam.py -m redteam` on PRs touching `app/guardrails/`, `app/eval/redteam/`, the red-team set, the guardrail judge prompt, or the test. A single successful injection (or over-block) turns the build red. Deselected from default `ci.yml` (`addopts = -m "not eval and not redteam"`), so the unit suite stays LLM-free.
 
+### 2.5 Regression-turns-red proof (Project Rule 4, Phase 6.3)
+
+Project Rule 4 — "a regression must turn the build red" — **demonstrated, not asserted.** A realistic regression was introduced and the gate caught it:
+
+- **Break (the "someone shipped a bug" case):** disable the Tier-2 judge — `guardrails/judge.py::judge` returns `Verdict.allow()` early (e.g. a refactor that drops the classification). The deterministic Tier 1 still runs.
+- **RED:** the red-team harness → **21 / 30 successful injections** (FAIL). The 9 Tier-1-caught attacks still block; the **21 escalation-dependent attacks slip** — which both proves the judge is load-bearing *and* turns the gate red.
+- **Revert → GREEN:** restore `judge.py` → **0 successful, 0 over-block** (PASS).
+
+The break is reverted (no permanent code change). **eval-rag enforces identically:** `app/eval/rag/harness.py::_assert_thresholds` raises `AssertionError` on any committed-threshold miss → `pytest -m eval` exits non-zero → the job goes red (a RAG regression below the §1.3 floors flips it the same way; no need to physically break retrieval to confirm the wiring).
+
 ---
 
 ## 3. Class-Detection Sanity Check (not a gate)
@@ -189,9 +199,12 @@ Partially filled as phases land. Remaining `PENDING` values are filled in Phase 
 | Embedding model | all-MiniLM-L6-v2 (384-dim, local) |
 | Corpus size (pages / chunks) | 5,157 pages scraped; 22,173 chunks (4,534 pages with ≥1 chunk) |
 | Retrieval strategy (dense / hybrid) | Dense-only (D-008); hybrid escalation open in P-007 |
-| RAG hit@5 | 0.667 (baseline, Phase 2.4) |
+| RAG hit@1 / hit@5 | 0.467 / 0.667 (baseline, Phase 2.4) |
 | RAG MRR@10 | 0.576 (baseline, Phase 2.4) |
-| RAG faithfulness (if measured) | PENDING |
-| Red-team successful injections | PENDING (target 0) |
-| Agent loop iteration cap | PENDING (P-008) |
-| Median `/bot/ask` latency | PENDING (end-to-end; RAG retrieve() median = 5.6 ms) |
+| RAG threshold floors (gate) | hit@1≥0.35, hit@5≥0.55, mrr@10≥0.45, p95≤300 ms |
+| RAG faithfulness (if measured) | not measured (ragas optional; out of scope) |
+| **Red-team successful injections** | **0 / 30** (strict gate; first run 13 → 0 after widening the nets/judge, Phase 6.1; over-blocks 0) |
+| **Regression-turns-red** | **proven** (Phase 6.3: judge disabled → 21 successful → revert → 0) |
+| **Agent live-state grounding (P-016)** | **12 / 12 = 100%** on the progression set (Phase 6.3); class-distinct melee↔ranger |
+| Agent loop iteration cap | 5 (MAX_ITERATIONS, D-024) |
+| Median `/bot/ask` latency | not measured end-to-end (RAG `retrieve()` median = 5.6 ms; LLM-bound otherwise) |
