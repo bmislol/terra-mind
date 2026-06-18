@@ -179,3 +179,48 @@ async def test_delete_me_erases_a_guest_tenant_too(
 ) -> None:
     """A guest that asks for erasure gets it — same purge as a player."""
     await _erasure_flow(app_session_factory, owner_sync_dsn, erasing_is_guest=True)
+
+
+async def test_delete_me_retains_preferences(
+    app_session_factory: async_sessionmaker[AsyncSession],
+    owner_sync_dsn: str,
+) -> None:
+    """D-032: erasure purges conversation CONTENT but KEEPS preferences (account
+    config). The account + prefs outlive a content erasure — proven from the
+    owner connection (RLS bypassed) AND a live GET that still returns them.
+    This is the assertion D-032's 5.1 extension lacked (Phase 6.2)."""
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    app = _build_app(app_session_factory, redis)
+    tenant_a = await _seed_tenant(app_session_factory)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        patched = await client.patch(
+            "/me/preferences",
+            json={"selected_version": "1.4.4.9"},
+            headers=_header(tenant_a),
+        )
+        assert patched.status_code == 200
+    await _ask(app, tenant_a, "A question")  # conversation content to erase
+
+    # Both the pref row and the content rows exist before erasure (owner view).
+    assert _owner_count(owner_sync_dsn, "tenant_preferences", tenant_a) == 1
+    assert _owner_count(owner_sync_dsn, "messages", tenant_a) == 2
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.delete("/me", headers=_header(tenant_a))
+        assert resp.status_code == 204
+        # The account survives → prefs are still readable after erasing content.
+        prefs = await client.get("/me/preferences", headers=_header(tenant_a))
+    assert prefs.status_code == 200
+    assert prefs.json()["selected_version"] == "1.4.4.9"
+
+    # Content gone, preferences RETAINED (owner view, RLS bypassed).
+    assert _owner_count(owner_sync_dsn, "messages", tenant_a) == 0
+    assert _owner_count(owner_sync_dsn, "sessions", tenant_a) == 0
+    assert _owner_count(owner_sync_dsn, "tenant_preferences", tenant_a) == 1
+
+    await redis.aclose()
