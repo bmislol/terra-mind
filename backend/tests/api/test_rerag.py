@@ -66,6 +66,11 @@ async def test_start_returns_job_id_and_second_is_409(
         job_id = r1.json()["job_id"]
         assert r1.json()["status"] == "queued"
 
+        # The enqueued job carries a generous timeout — RQ's 180s default would
+        # kill a real (minutes-long) corpus re-rag mid-run (D-033).
+        enqueued = app.state.rerag_queue.fetch_job(job_id)
+        assert enqueued is not None and enqueued.timeout == 1800
+
         # A 2nd start while the first holds the lock → 409 (single-job guard).
         r2 = await client.post(
             "/admin/rerag", json={"version": "1.4.4.9"}, headers=_header(op, "operator")

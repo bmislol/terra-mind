@@ -100,3 +100,29 @@ def audit_log(token: str) -> list[dict[str, Any]]:
     if resp.status_code != 200:
         raise ApiError(resp.status_code, _detail(resp))
     return list(resp.json())
+
+
+def rerag_start(token: str, *, version: str) -> dict[str, Any]:
+    """Start a background re-rag. Returns {job_id, status} (202). Raises
+    ApiError(409) if a re-rag is already running (the single-job guard)."""
+    resp = httpx.post(
+        f"{API_BASE}/admin/rerag",
+        json={"version": version},
+        headers=_auth(token),
+        timeout=_TIMEOUT,
+    )
+    if resp.status_code not in (200, 202):
+        raise ApiError(resp.status_code, _detail(resp))
+    return dict(resp.json())
+
+
+def rerag_status(token: str, job_id: str) -> dict[str, Any]:
+    """Poll a re-rag job: status + live progress (stage/done/total)."""
+    resp = httpx.get(
+        f"{API_BASE}/admin/rerag/status/{job_id}",
+        headers=_auth(token),
+        timeout=_TIMEOUT,
+    )
+    if resp.status_code != 200:
+        raise ApiError(resp.status_code, _detail(resp))
+    return dict(resp.json())

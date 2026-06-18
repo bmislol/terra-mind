@@ -692,14 +692,26 @@ Operator surface + THE DEMO FALLBACK (RUNBOOK §7.1). Full-parity test chat is t
       `postgresql+psycopg://` (psycopg2 is not a dep — the worker would have
       crashed at engine creation). A-gate green (266 tests).
 
-**Commit 4 — UI + close:**
-- [ ] Streamlit Versions tab: re-rag button + polling progress (replaces
-      the "script, not a button" note).
-- [ ] **Verify in-stack** — operator clicks re-rag → job runs in the
-      worker → progress streams → version queryable; 2nd attempt → 409;
-      (if testable) api restart mid-job → job survives.
-- [ ] CI green; `ARCH.md` (§2 services + §10 re-rag flow + §7 endpoints),
-      RUNBOOK, DECISIONS (D-033 closeout), Checklist 5.3, CLAUDE §2. Tick.
+**Commit 4 — UI + close (done):**
+- [x] Streamlit Versions tab: re-rag button + version select + a
+      `st.fragment(run_every=2)` polling progress bar (stage + done/total) →
+      succeeded/failed terminal; 409 → "already running". Replaces the
+      "script, not a button" note.
+- [x] **Verified in-stack (the payoff — real worker, real corpus).** Fresh
+      operator → `POST /admin/rerag` → **202** + job_id; 2nd → **409**;
+      worker embedded **5157/5157** pages (~5.5 min), progress streamed
+      `300→5157`, job **succeeded**; a **`corpus.reragged`** audit row
+      landed; `rag_chunks` for 1.4.4.9 = **22,173** (queryable). Proves
+      commit 3's relocation + psycopg3 fixes on the real worker+DB+model
+      path (the unit tests faked `run_build`).
+- [x] **Found + fixed live:** RQ's 180s default `job_timeout` killed the
+      first run at 2550/5157 → set `job_timeout=1800` on enqueue (+ unit
+      assertion). (Also: a build-cache disk-full — environmental, freed.)
+      Logged P-020 (lock-released-before-retry, single-worker-harmless) +
+      P-021 (worker/api re-download the model on rebuild → share HF cache).
+- [x] A-gate green; `ARCH.md` (§2 worker + §7 endpoints + §10 re-rag flow +
+      §13.1 button), RUNBOOK §4.1, DECISIONS (D-033 closeout + P-020/P-021),
+      Checklist 5.3, CLAUDE §2. **5.3 done — re-rag button shipped (D-033).**
 
 ---
 

@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.domain.admin import ReragStartResponse, ReragStatus
 from app.jobs.queue import (
+    RERAG_JOB_TIMEOUT_SECONDS,
     RERAG_LOCK_KEY,
     RERAG_LOCK_TTL_SECONDS,
     rerag_progress_key,
@@ -68,6 +69,7 @@ async def start_rerag(
             version,
             str(requested_by),
             job_id=str(job_id),
+            job_timeout=RERAG_JOB_TIMEOUT_SECONDS,
             retry=Retry(max=2),
         )
     except Exception:

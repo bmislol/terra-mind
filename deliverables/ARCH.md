@@ -67,8 +67,9 @@ Every turn is one Langfuse trace: the player message at the root, the router dec
 | `frontend-admin` | Streamlit operator/test bench (§13.1). |
 | `frontend-user` | React + Vite config portal, served static (§13.2). |
 | `migrate` | Runs `alembic upgrade head` and exits before `api` boots. |
+| `worker` | RQ worker (`rq worker rerag`) on the existing Redis — runs the operator-triggered corpus re-rag as a background job (D-033). Same image as `api`; `DATABASE_URL` + the data volume (RW) + Redis, **no Vault**. Runs independently of `api` (a re-rag survives an `api` restart). |
 | `db` | Postgres 16 with `pgvector`. Tenant data + the shared, version-tagged wiki corpus. |
-| `redis` | Redis 7 for short-term session memory (TTL) and service-layer caches. |
+| `redis` | Redis 7 for short-term session memory (TTL), the JWT denylist, and the RQ re-rag broker + single-job lock + live-progress hash (D-033). |
 | `vault` | HashiCorp Vault (dev mode) for runtime secret resolution. |
 | `vault-init` | Seeds Vault KV paths from env and exits. |
 | `langfuse` | Self-hosted Langfuse for trace storage and the trace-tree UI. |
@@ -181,7 +182,7 @@ First operator is bootstrapped via a script (RUNBOOK §3).
 
 ## 7. Endpoint Inventory
 
-_Status: auth + `/bot/ask` gating landed Phase 4.1a; `/versions` + `/me/preferences` (GET/PATCH) landed **Phase 5.1** (+ a locked-origin CORS allow-list, never `*`); `/admin/tenants` + `/admin/audit-log` landed **Phase 5.2** (`/admin/versions/check` + `/admin/rerag` deferred — P-018/P-019). Phase tags in Notes column._
+_Status: auth + `/bot/ask` gating landed Phase 4.1a; `/versions` + `/me/preferences` (GET/PATCH) landed **Phase 5.1** (+ a locked-origin CORS allow-list, never `*`); `/admin/tenants` + `/admin/audit-log` landed **Phase 5.2**; `/admin/rerag` + `/admin/rerag/status/{id}` landed **Phase 5.3** (reverses P-019 → D-033). `/admin/versions/check` still deferred (P-018). Phase tags in Notes column._
 
 | Method | Endpoint | Roles | Notes |
 |---|---|---|---|
@@ -198,9 +199,10 @@ _Status: auth + `/bot/ask` gating landed Phase 4.1a; `/versions` + `/me/preferen
 | `PATCH` | `/me/preferences` | Player (**access JWT**) | Upsert own preferences (RLS-scoped). **Implemented Phase 5.1.** |
 | `DELETE` | `/me` | Player (access JWT) | **Conversation/data erasure (D-032), implemented Phase 4.1b** — purges the tenant's `messages`/`sessions` (RLS-scoped DELETE) + Redis history keys + a `tenant.erased` audit row. **Keeps the account row** (full account/email deletion → P-015). |
 | `GET` | `/admin/tenants` | operator (**`require_operator`**) | List all tenants (id/email/is_guest/created_at). **Cross-tenant** read, NOT RLS-scoped — `tenants` has no RLS (D-017); the gate is the control. **Implemented Phase 5.2.** |
-| `GET` | `/admin/audit-log` | operator (**`require_operator`**) | Recent audit events (`tenant.erased`/`auth.login`/`session.revoked`, SECURITY §6). Cross-tenant read of the non-RLS `audit_log` (D-017). **Implemented Phase 5.2.** |
+| `GET` | `/admin/audit-log` | operator (**`require_operator`**) | Recent audit events (`tenant.erased`/`auth.login`/`session.revoked`/`corpus.reragged`, SECURITY §6). Cross-tenant read of the non-RLS `audit_log` (D-017). **Implemented Phase 5.2.** |
 | `GET` | `/admin/versions/check` | operator | Newer-than-stored wiki check. **Deferred (P-018)** — live-wiki compare, ~zero demo value; the admin view lists stored versions via `GET /versions`. |
-| `POST` | `/admin/rerag` | operator | Trigger re-rag as a background job. **Deferred (P-019)** — `scripts/build_corpus.py` is the must-have (ARCH §10); the button is stretch. |
+| `POST` | `/admin/rerag` | operator (**`require_operator`**) | Start a corpus re-rag as a **background job** (D-033, reverses P-019): acquire the single-job lock → enqueue on RQ → `202 {job_id, status}`; **409** if one is already running (no queue). **Implemented Phase 5.3.** |
+| `GET` | `/admin/rerag/status/{job_id}` | operator (**`require_operator`**) | Poll a re-rag job: the durable `rerag_jobs` row (status/timestamps/error) + the freshest live progress (stage/done/total) overlaid from Redis. `404` if unknown. **Implemented Phase 5.3.** |
 
 ## 8. Memory Plan
 
@@ -334,6 +336,10 @@ All three scripts fail loudly and leave the manifest in a deterministically inco
 
 **Idempotency:** `INSERT … ON CONFLICT (page_id, chunk_index, game_version) DO UPDATE SET …` — re-runs update in place without duplicates.
 
+**Code home (Phase 5.3):** the build logic is `app/rag/corpus_build.py:run_build(version, db_url, *, force=False, progress=…)`; `scripts/build_corpus.py` is a thin CLI over it. It lives in `app/` (not `scripts/`) so the re-rag worker can import it (the worker image ships `app/`, not `scripts/`, and app→scripts would invert the layering). The sync engine uses a `postgresql+psycopg://` (psycopg v3) DSN — psycopg2 is not a dependency.
+
+**Operator re-rag as a background job (Phase 5.3, D-033 — reverses P-019):** `build_corpus.py` remains the host-side CLI fallback, but re-rag is now also operator-triggerable. `POST /admin/rerag` acquires a Redis single-job lock (→ **409** if held), records a `rerag_jobs` row, and enqueues an RQ job; the **`worker`** service runs `run_build(force=False, progress=cb)` — the idempotent upsert path, **never `--force`** (which would leave a half-deleted version on a mid-run death). The progress callback writes a Redis live hash **and** the durable `rerag_jobs` row each tick (the api's status endpoint reads both across the two-process boundary); the lock TTL is heartbeated each tick (a dead worker's lock frees). On success it writes a `corpus.reragged` audit row (§6) and marks the job succeeded; on failure it records the error and re-raises (RQ retries — safe, idempotent). Scope = **re-embed the cached corpus**; a re-scrape step (`scrape_wiki.py`) is a documented extension seam, not built (no newer 1.4.4.9 snapshot to fetch). `rerag_jobs` is operator/cross-tenant data → **no RLS**, `require_operator`-gated (D-017), like `audit_log`.
+
 **Licensing:** wiki content is CC BY-NC-SA 4.0. `source_url` (from `canonicalurl`) is stored in every `rag_chunks` row for per-chunk attribution. Cargo data is the same CC BY-NC-SA 4.0 content served through a different API endpoint.
 
 The trained-classifier artifact contract (SHA-pinned weights, model card, refuse-to-boot on mismatch) is **deferred to future work** along with the model itself (D-009).
@@ -392,7 +398,7 @@ Structured JSON via `app/core/logging.py::JSONFormatter`:
 
 Operator / test bench on `localhost:8501` (Streamlit). **Implemented Phase 5.2.** Operator-gated — a player token logs in but is blocked from the bench (the real gate is the backend `require_operator` → 403; the UI just hides it). All API calls are **server-side** (httpx from the Streamlit process) → **no CORS** (not a browser origin). Tabs:
 - **Test chat (centerpiece, the demo fallback — RUNBOOK §7.1):** pick a **preset** `StatePayload` (melee pre-boss / ranger post-EoC / mage hardmode — real `item_id`s where confident, D-026) + a question → `POST /bot/ask` → renders the **answer**, **routing** (faq/agent), session_id, and the raw payload sent. The full router → agent/RAG path, no Terraria.
-- **Versions** — stored corpus versions via `GET /versions` (+ a note that re-rag is `scripts/build_corpus.py`, not a button — P-019).
+- **Versions** — stored corpus versions via `GET /versions`, **plus a re-rag control (Phase 5.3, D-033):** pick a version + **Re-rag** → `POST /admin/rerag` → a polling progress bar (stage + done/total, refreshed every 2s via a fragment) driven by `GET /admin/rerag/status/{id}` → succeeded/failed terminal state; a 2nd click while one runs surfaces the **409** ("already running"). The `build_corpus.py` CLI stays the fallback.
 - **Tenants** + **Audit log** — the operator views `GET /admin/tenants` + `GET /admin/audit-log` (cross-tenant, `require_operator`-gated; not RLS-scoped — D-017).
 
 `/admin/versions/check` (P-018) and the `/admin/rerag` button (P-019) are deferred — the `build_corpus.py` script is the must-have (ARCH §10).

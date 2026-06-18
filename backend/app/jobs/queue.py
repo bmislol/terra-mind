@@ -33,6 +33,10 @@ RERAG_LOCK_TTL_SECONDS = 1800
 #: Live-progress hash TTL — the hash self-cleans; the durable rerag_jobs row is
 #: the source of truth once it's gone.
 RERAG_PROGRESS_TTL_SECONDS = 3600
+#: Max wall-clock for one re-rag job. RQ's default is 180s, far too short to
+#: embed the full corpus (thousands of pages, minutes) — the job would be killed
+#: mid-run. Generous ceiling; the lock heartbeat tracks liveness within it.
+RERAG_JOB_TIMEOUT_SECONDS = 1800
 
 _DEFAULT_REDIS_URL = "redis://redis:6379/0"
 
