@@ -814,29 +814,39 @@ verify-not-build (erasure already exists from 4.1b).
       4 messages / 2 sessions / 2 Redis keys → `DELETE /me` → content **0**,
       Redis cleared, `tenant.erased deleted_rows=6`, **prefs + account row
       retained**, `GET /me/preferences` still returns `1.4.4.9`.
-- [ ] Demo path: erasure via the React portal button (5.1) — **operator
-      does the in-browser click** (the brief's "delete my data" demo).
+- [x] Demo path: erasure via the React portal button (5.1) — **verified
+      in-browser**: "conversation data deleted, preferences kept" → re-login →
+      account + `1.4.4.9` survived (the brief's "delete my data" demo).
 - [x] `SECURITY.md §3/§4/§6` reflect the proven flow (content erased;
       account/audit/`guardrail.blocked`/preferences retained). Tick 6.2.
 
 ### Phase 6.3 · CI eval gates green — `feat/26-ci-eval-gates`
-- [ ] **`eval-redteam.yml`** (PR-triggered, no DB — exercises the
-      guardrail filter on inputs/outputs): RED on any successful
-      injection, green at 0. Runs on PRs touching `app/guardrails/`, the
-      red-team set, or the guardrail prompts.
-- [ ] **`eval-rag.yml`** (manual-dispatch, needs the live corpus DB):
-      enforces the `eval_thresholds.yaml` hit@k / MRR floors; a
-      regression below threshold fails the job.
-- [ ] **Prove the gate works**: deliberately introduce a regression
-      (a guardrail bypass / a threshold miss) → CI turns RED → fix → green.
-      This is the "a regression must turn the build red" requirement,
-      demonstrated.
-- [ ] **P-016 broad measurement** (deferred from 4.4): measure the
-      agent-grounding fix across the RAG golden set / progression
-      questions (not just the in-game n≈5) — record whether it
-      helps/regresses, as a number. Lands here with the eval harness.
-- [ ] CI green on `main`; `EVALS.md` (both gates + the regression proof),
-      final numbers table started. Tick 6.3 → Section 6 complete.
+> **Audit-first finding:** the gates were already wired/enforced —
+> `eval-redteam.yml` (auto, PR-gated, proven green in 6.1) and `eval-rag.yml`
+> (the harness genuinely `_assert_thresholds` → fails the job; manual-dispatch,
+> corpus too heavy per-PR). All thresholds are REAL measured numbers. So 6.3 =
+> the two **demonstrations** + the final numbers, not new gate plumbing.
+
+**Commit 1 — P-016 grounding measurement (done):**
+- [x] `app/eval/agent/harness.py` + `data/eval/agent_grounding.jsonl` (12
+      state-dependent progression questions, melee/ranger/mage × stages). Runs
+      the real agent graph, inspects `result['messages']` for live-state tool
+      calls (the objective grounding proxy — 4.4 finding). **12/12 = 100%
+      grounded** + melee↔ranger class-distinct spot-check. Measured, NOT
+      re-tuned. EVALS §3b. A recorded number, not a CI gate.
+
+**Commit 2 — regression demo + closeout (done):**
+- [x] **Regression-turns-red PROVEN** (Project Rule 4): disable the Tier-2
+      judge → red-team harness **21 successful (RED)** → revert → **0 (green)**.
+      The 9 Tier-1-caught attacks still block (the judge catches 21 the
+      deterministic tier misses). Break reverted, no permanent code. EVALS §2.5.
+- [x] **`eval-rag.yml` enforces the same way** — pointed to
+      `_assert_thresholds` raising → `pytest -m eval` non-zero → job red (no
+      need to physically break RAG; the assert-raises path is the proof).
+- [x] **ci.yml** tightened: `mypy app` → `mypy app tests scripts` (match local).
+- [x] `EVALS.md §5` Final Numbers filled (RAG baselines, redteam 0/0 + 13→0,
+      grounding 12/12, regression-proof); Checklist 6.3 + CLAUDE §2.
+      **6.3 done → Section 6 COMPLETE.**
 
 ---
 

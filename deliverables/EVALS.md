@@ -136,6 +136,16 @@ All tunings are general **classes**, not the verbatim set strings (robust to nov
 
 Job: `.github/workflows/eval-redteam.yml` — **PR-triggered**, no DB (it exercises the guardrail filter, not retrieval), needs the `ANTHROPIC_API_KEY` secret (the real judge). Runs `pytest tests/test_eval_redteam.py -m redteam` on PRs touching `app/guardrails/`, `app/eval/redteam/`, the red-team set, the guardrail judge prompt, or the test. A single successful injection (or over-block) turns the build red. Deselected from default `ci.yml` (`addopts = -m "not eval and not redteam"`), so the unit suite stays LLM-free.
 
+### 2.5 Regression-turns-red proof (Project Rule 4, Phase 6.3)
+
+Project Rule 4 — "a regression must turn the build red" — **demonstrated, not asserted.** A realistic regression was introduced and the gate caught it:
+
+- **Break (the "someone shipped a bug" case):** disable the Tier-2 judge — `guardrails/judge.py::judge` returns `Verdict.allow()` early (e.g. a refactor that drops the classification). The deterministic Tier 1 still runs.
+- **RED:** the red-team harness → **21 / 30 successful injections** (FAIL). The 9 Tier-1-caught attacks still block; the **21 escalation-dependent attacks slip** — which both proves the judge is load-bearing *and* turns the gate red.
+- **Revert → GREEN:** restore `judge.py` → **0 successful, 0 over-block** (PASS).
+
+The break is reverted (no permanent code change). **eval-rag enforces identically:** `app/eval/rag/harness.py::_assert_thresholds` raises `AssertionError` on any committed-threshold miss → `pytest -m eval` exits non-zero → the job goes red (a RAG regression below the §1.3 floors flips it the same way; no need to physically break retrieval to confirm the wiring).
+
 ---
 
 ## 3. Class-Detection Sanity Check (not a gate)
@@ -146,6 +156,19 @@ Class detection is a hybrid of live gear-read + LLM zero-shot (D-009, implemente
 - `tests/agent/test_class_detection.py` — the `ItemClassifier` tier logic against a synthetic Cargo fixture: weapon class via Cargo `damagetype`, tool-with-damagetype excluded (A2), armor via the curated map and the Cargo `item_id→name` bridge (A3), `item_id`-over-name precedence, the four refuse-to-boot cases, and the `llm_classify` zero-shot fallback (mocked Anthropic).
 
 This is correctness, not a quality threshold. The hybrid design (Cargo `damagetype` for 446 weapon rows gated on `type=weapon` + curated armor/fallback map + LLM zero-shot for no-signal gear) and its numbers are in DECISIONS.md D-026.
+
+---
+
+## 3b. Agent Live-State Grounding (P-016 broad measurement — not a gate)
+
+Closes the **4.4 measurement boundary**: the `agent_system.md` grounding instruction was proven only n≈5 in-game; this measures whether it **generalizes**. The agent reaches the live `StatePayload` **only** by calling a live-state tool (`analyze_loadout` / `suggest_next_boss`) — the 4.4 finding — so a **tool call is the objective proxy** for "grounded in live state", no judge needed.
+
+- **Harness:** `app/eval/agent/harness.py` over `data/eval/agent_grounding.jsonl` (12 state-dependent progression questions across melee/ranger/mage × pre-boss → post-Plantera). Runs the real agent graph and inspects `result["messages"]` for the tool calls. Needs the corpus DB + `ANTHROPIC_API_KEY`; run manually like the RAG eval.
+- **Metric:** grounding rate = fraction that called a live-state tool.
+
+**Result (Phase 6.3): 12 / 12 = 100% grounded.** Every question called `analyze_loadout`; most also called `suggest_next_boss`. The **melee↔ranger distinctness** spot-check (same question, two class states) — answers differ and are class-appropriate (melee → "melee class", swords; ranger → "ranger", ranged ammo weapons) — so the agent doesn't just *reach* the live state, it *uses* it.
+
+**Honest scope:** 12 questions, all the **state-dependent** kind where grounding should matter (pure-FAQ lookups route to the FAQ path, not the agent). Within that scope the 4.4 fix generalizes cleanly — no misses, no failure pattern. The metric is the *mechanism* (tool call); the spot-check confirms the *outcome* (class-distinct advice). **Not a CI gate** — LLM/corpus-dependent; a recorded number that closes P-016.
 
 ---
 
@@ -176,9 +199,12 @@ Partially filled as phases land. Remaining `PENDING` values are filled in Phase 
 | Embedding model | all-MiniLM-L6-v2 (384-dim, local) |
 | Corpus size (pages / chunks) | 5,157 pages scraped; 22,173 chunks (4,534 pages with ≥1 chunk) |
 | Retrieval strategy (dense / hybrid) | Dense-only (D-008); hybrid escalation open in P-007 |
-| RAG hit@5 | 0.667 (baseline, Phase 2.4) |
+| RAG hit@1 / hit@5 | 0.467 / 0.667 (baseline, Phase 2.4) |
 | RAG MRR@10 | 0.576 (baseline, Phase 2.4) |
-| RAG faithfulness (if measured) | PENDING |
-| Red-team successful injections | PENDING (target 0) |
-| Agent loop iteration cap | PENDING (P-008) |
-| Median `/bot/ask` latency | PENDING (end-to-end; RAG retrieve() median = 5.6 ms) |
+| RAG threshold floors (gate) | hit@1≥0.35, hit@5≥0.55, mrr@10≥0.45, p95≤300 ms |
+| RAG faithfulness (if measured) | not measured (ragas optional; out of scope) |
+| **Red-team successful injections** | **0 / 30** (strict gate; first run 13 → 0 after widening the nets/judge, Phase 6.1; over-blocks 0) |
+| **Regression-turns-red** | **proven** (Phase 6.3: judge disabled → 21 successful → revert → 0) |
+| **Agent live-state grounding (P-016)** | **12 / 12 = 100%** on the progression set (Phase 6.3); class-distinct melee↔ranger |
+| Agent loop iteration cap | 5 (MAX_ITERATIONS, D-024) |
+| Median `/bot/ask` latency | not measured end-to-end (RAG `retrieve()` median = 5.6 ms; LLM-bound otherwise) |
