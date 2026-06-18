@@ -149,6 +149,19 @@ This is correctness, not a quality threshold. The hybrid design (Cargo `damagety
 
 ---
 
+## 3b. Agent Live-State Grounding (P-016 broad measurement — not a gate)
+
+Closes the **4.4 measurement boundary**: the `agent_system.md` grounding instruction was proven only n≈5 in-game; this measures whether it **generalizes**. The agent reaches the live `StatePayload` **only** by calling a live-state tool (`analyze_loadout` / `suggest_next_boss`) — the 4.4 finding — so a **tool call is the objective proxy** for "grounded in live state", no judge needed.
+
+- **Harness:** `app/eval/agent/harness.py` over `data/eval/agent_grounding.jsonl` (12 state-dependent progression questions across melee/ranger/mage × pre-boss → post-Plantera). Runs the real agent graph and inspects `result["messages"]` for the tool calls. Needs the corpus DB + `ANTHROPIC_API_KEY`; run manually like the RAG eval.
+- **Metric:** grounding rate = fraction that called a live-state tool.
+
+**Result (Phase 6.3): 12 / 12 = 100% grounded.** Every question called `analyze_loadout`; most also called `suggest_next_boss`. The **melee↔ranger distinctness** spot-check (same question, two class states) — answers differ and are class-appropriate (melee → "melee class", swords; ranger → "ranger", ranged ammo weapons) — so the agent doesn't just *reach* the live state, it *uses* it.
+
+**Honest scope:** 12 questions, all the **state-dependent** kind where grounding should matter (pure-FAQ lookups route to the FAQ path, not the agent). Within that scope the 4.4 fix generalizes cleanly — no misses, no failure pattern. The metric is the *mechanism* (tool call); the spot-check confirms the *outcome* (class-distinct advice). **Not a CI gate** — LLM/corpus-dependent; a recorded number that closes P-016.
+
+---
+
 ## 4. Redaction Test (separate CI job, blocking)
 
 A test asserts a fake secret (`sk-test-FAKE-not-real`) never appears unredacted in structured logs or Langfuse trace spans. It exercises a full `/bot/ask` turn so the redaction boundary is hit. Details in `SECURITY.md §7`. Mandatory for CI green.
