@@ -800,15 +800,24 @@ verify-not-build (erasure already exists from 4.1b).
 > audit-logged, owner-connection physical-deletion test; 5.1/D-032:
 > retains preferences). This phase = prove it end-to-end as a live demo +
 > close any gap, NOT rebuild it.
-- [ ] Verify `DELETE /me` end-to-end live: a tenant with sessions +
-      messages + Redis session + prefs → erase → conversation rows gone
-      (owner-connection check), Redis session cleared, `tenant.erased`
-      audit row written, prefs retained (D-032).
-- [ ] Confirm the existing `test_erasure.py` covers it; add any missing
-      assertion (Redis-cleared, audit-written) if not already there.
-- [ ] Demo path: erasure via the React portal button (5.1) → show the
-      rows gone + audit row (the brief's "delete my data" demo).
-- [ ] `SECURITY.md §6/§7` reflects the proven flow. Tick 6.2.
+- [x] **Audit (verify-not-rebuild):** erasure built (4.1b) + 3-of-4
+      guarantees already tested — (a) Postgres rows physically gone
+      (owner-connection), (b) Redis cleared, (c) `tenant.erased` audit —
+      plus guest erasure. **Gap: (d) D-032 "prefs RETAINED" was asserted
+      but UNTESTED.** 6.1 added no new tenant-scoped content to purge
+      (`guardrail.blocked` = operator-audit, no PII, retained by design).
+- [x] **Closed the gap:** `test_erasure.py::test_delete_me_retains_preferences`
+      — `PATCH /me/preferences` → erase → owner-connection `tenant_preferences`
+      count `== 1` (retained) + post-erasure `GET /me/preferences` still
+      returns it. A-gate green (**328 tests**).
+- [x] **Live in-stack capture** (reproducible, like 5.3): player + prefs +
+      4 messages / 2 sessions / 2 Redis keys → `DELETE /me` → content **0**,
+      Redis cleared, `tenant.erased deleted_rows=6`, **prefs + account row
+      retained**, `GET /me/preferences` still returns `1.4.4.9`.
+- [ ] Demo path: erasure via the React portal button (5.1) — **operator
+      does the in-browser click** (the brief's "delete my data" demo).
+- [x] `SECURITY.md §3/§4/§6` reflect the proven flow (content erased;
+      account/audit/`guardrail.blocked`/preferences retained). Tick 6.2.
 
 ### Phase 6.3 · CI eval gates green — `feat/26-ci-eval-gates`
 - [ ] **`eval-redteam.yml`** (PR-triggered, no DB — exercises the
