@@ -1,15 +1,24 @@
-"""Unit tests for scripts/build_corpus.py helpers.  No live DB or network."""
+"""Unit tests for the corpus build logic (app/rag/corpus_build.py).
 
+The build lives in app/ (importable by the CLI and the re-rag worker alike,
+Phase 5.3); scripts/build_corpus.py is now just the CLI front-end. No live DB
+or network.
+"""
+
+import itertools
 import json
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 import numpy as np
+import pytest
 import sqlalchemy as sa
 from sqlalchemy import text
 
+import app.rag.corpus_build as build_corpus
+from app.rag.corpus_build import _UPSERT_SQL, _upsert_chunks, _write_orphan_recipes
 from app.rag.models import ChunkRecord
-from scripts.build_corpus import _UPSERT_SQL, _upsert_chunks, _write_orphan_recipes
 
 # ── Upsert correctness ────────────────────────────────────────────────────────
 
@@ -197,3 +206,123 @@ def test_orphan_recipes_idempotent_rerun(tmp_path: Path) -> None:
     # Second call should produce the same single-line file, not append.
     _write_orphan_recipes(cargo_recipes, known_pages, orphan_path)
     assert orphan_path.read_text().count("\n") == 1
+
+
+# ── run_build progress seam (Phase 5.3 commit 2) ──────────────────────────────
+
+# The same rag_chunks shape as _make_sqlite_engine, but for a file-backed DB so
+# run_build (which opens its own engine from the URL) sees the table.
+_RAG_CHUNKS_DDL = """
+    CREATE TABLE rag_chunks (
+        id          TEXT    PRIMARY KEY,
+        page_id     INTEGER NOT NULL,
+        chunk_index INTEGER NOT NULL,
+        revision_id INTEGER NOT NULL DEFAULT 0,
+        source_url  TEXT    NOT NULL DEFAULT '',
+        game_version TEXT   NOT NULL,
+        page_title  TEXT    NOT NULL,
+        section     TEXT    NOT NULL DEFAULT '',
+        content     TEXT    NOT NULL,
+        embedding   TEXT    NOT NULL,
+        created_at  TEXT    NOT NULL,
+        UNIQUE (page_id, chunk_index, game_version)
+    )
+"""
+
+
+class _FakeEmbedder:
+    """Stand-in for app.rag.embedder.Embedder — no model download."""
+
+    model_name = "fake-MiniLM"
+    dim = 384
+
+    def encode(self, texts: list[str]) -> np.ndarray:
+        return np.zeros((len(texts), 384), dtype=np.float32)
+
+
+def test_run_build_threads_progress_and_still_builds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """run_build reports (stage, done, total) AND performs the idempotent upsert.
+
+    The chunker + embedder are faked (no model load, no wiki) and the build runs
+    against a file-backed SQLite. This proves the new progress seam fires
+    (``loading`` then ``embedding`` to 100%) while the build still writes rows —
+    behaviour unchanged. ``force`` defaults False → the idempotent-upsert path the
+    re-rag worker uses (D-033), never a destructive delete.
+    """
+    version = "9.9.9.9"
+    raw = tmp_path / version
+    pages = raw / "pages"
+    cargo = raw / "cargo"
+    pages.mkdir(parents=True)
+    cargo.mkdir(parents=True)
+    (raw / "manifest.json").write_text(
+        json.dumps({"cargo_raw_sha256": "deadbeef"}), encoding="utf-8"
+    )
+    (cargo / "items.json").write_text("[]", encoding="utf-8")
+    (cargo / "recipes.json").write_text("[]", encoding="utf-8")
+
+    n_pages = 3
+    for i in range(n_pages):
+        (pages / f"p{i}.json").write_text(
+            json.dumps({"title": f"Page {i}"}), encoding="utf-8"
+        )
+
+    db_path = tmp_path / "corpus.db"
+    db_url = f"sqlite:///{db_path}"
+    engine = sa.create_engine(db_url)
+    with engine.begin() as conn:
+        conn.execute(text(_RAG_CHUNKS_DDL))
+    engine.dispose()
+
+    # One chunk per page, with distinct page_ids so all rows are kept.
+    counter = itertools.count(1)
+
+    def fake_chunk_page(
+        page_data: dict[str, Any],
+        *,
+        game_version: str,
+        cargo_items: dict[str, dict[str, str]],
+        cargo_recipes: dict[str, list[dict[str, str]]],
+    ) -> tuple[list[ChunkRecord], bool]:
+        chunk = ChunkRecord(
+            page_id=next(counter),
+            chunk_index=0,
+            revision_id=1,
+            source_url="https://terraria.wiki.gg/wiki/Test",
+            game_version=game_version,
+            page_title=page_data["title"],
+            section="s",
+            content="c",
+            embed_text="t",
+        )
+        return [chunk], False
+
+    monkeypatch.setattr(build_corpus, "_DATA_ROOT", tmp_path)
+    monkeypatch.setattr(build_corpus, "Embedder", _FakeEmbedder)
+    monkeypatch.setattr(build_corpus, "chunk_page", fake_chunk_page)
+
+    events: list[tuple[str, int, int]] = []
+
+    def record(stage: str, done: int, total: int) -> None:
+        events.append((stage, done, total))
+
+    rc = build_corpus.run_build(version, db_url, progress=record)
+
+    assert rc == 0
+    stages = [stage for stage, _, _ in events]
+    assert "loading" in stages
+    assert "embedding" in stages
+    # The embedding stage reaches 100% (done == total).
+    embedding_ticks = [
+        (done, total) for stage, done, total in events if stage == "embedding"
+    ]
+    assert embedding_ticks[-1] == (n_pages, n_pages)
+
+    # And the build actually happened — one row per page, via the upsert.
+    engine = sa.create_engine(db_url)
+    with engine.connect() as conn:
+        count = conn.execute(text("SELECT COUNT(*) FROM rag_chunks")).scalar()
+    engine.dispose()
+    assert count == n_pages

@@ -23,11 +23,50 @@ st.session_state.setdefault("role", None)
 st.session_state.setdefault("session_id", None)
 st.session_state.setdefault("last_answer", None)
 st.session_state.setdefault("preset", None)
+st.session_state.setdefault("rerag_job_id", None)
 
 
 def _logout() -> None:
-    for key in ("token", "role", "session_id", "last_answer", "preset"):
+    for key in ("token", "role", "session_id", "last_answer", "preset", "rerag_job_id"):
         st.session_state[key] = None
+
+
+@st.fragment(run_every=2)
+def _rerag_status_panel() -> None:
+    """Poll the active re-rag job every 2s and render its progress/terminal state.
+
+    Rendered only while a job_id is set (the worker writes the durable row + a
+    Redis live-progress hash; this reads them via GET /admin/rerag/status/{id}).
+    """
+    job_id = st.session_state.get("rerag_job_id")
+    if not job_id:
+        return
+    try:
+        status = api.rerag_status(st.session_state.token, job_id)
+    except api.ApiError as exc:
+        st.error(f"Status check failed: {exc}")
+        return
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"Could not reach the API: {exc}")
+        return
+
+    state = status.get("status", "?")
+    done = status.get("done") or 0
+    total = status.get("total") or 0
+    frac = (done / total) if total else 0.0
+    st.caption(f"job `{job_id}`")
+    if state == "queued":
+        st.progress(0.0, text="queued — waiting for the worker…")
+    elif state == "running":
+        st.progress(frac, text=f"running — {status.get('stage') or '…'} {done}/{total}")
+    elif state == "succeeded":
+        st.success(
+            f"Re-rag succeeded — {status.get('version')} ({done} pages embedded)."
+        )
+    elif state == "failed":
+        st.error(f"Re-rag failed: {status.get('error') or 'unknown error'}")
+    else:
+        st.json(status)
 
 
 # ── Sidebar: login ────────────────────────────────────────────────────────────
@@ -133,13 +172,36 @@ with tab_chat:
 with tab_versions:
     st.subheader("Corpus versions")
     try:
-        st.write(api.versions() or "(none)")
+        versions = api.versions()
     except Exception as exc:  # noqa: BLE001
+        versions = []
         st.error(f"Could not load versions: {exc}")
-    st.info(
-        "Re-rag (snapshot + embed) is a **script, not a button** (P-019): run "
-        "`scripts/build_corpus.py` (ARCH §10). The admin button is deferred."
+    st.write(versions or "(none)")
+
+    st.divider()
+    st.subheader("Re-rag — re-embed the cached corpus")
+    st.caption(
+        "Operator-triggered background job (D-033): re-embeds the cached corpus "
+        "for a version on the worker. One at a time — a 2nd while one runs → 409. "
+        "`scripts/build_corpus.py` stays the CLI fallback (ARCH §10)."
     )
+    options = versions or ["1.4.4.9"]
+    rerag_version = st.selectbox("Version to re-rag", options, key="rerag_version")
+    if st.button("Re-rag", type="primary"):
+        try:
+            result = api.rerag_start(st.session_state.token, version=rerag_version)
+            st.session_state.rerag_job_id = result.get("job_id")
+            st.toast(f"Re-rag started — job {result.get('job_id')}")
+        except api.ApiError as exc:
+            if exc.status == 409:
+                st.warning("A re-rag is already running — only one at a time (409).")
+            else:
+                st.error(f"Re-rag failed to start: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"Could not reach the API: {exc}")
+
+    if st.session_state.get("rerag_job_id"):
+        _rerag_status_panel()
 
 with tab_tenants:
     st.subheader("Tenants — operator view")

@@ -56,6 +56,7 @@ Top-level; final list confirmed in Phase 7.2.
 | `fastapi-users` | Auth | MIT |
 | `pgvector` (py) | Vector store client | MIT |
 | `redis` | Short-term session memory | MIT |
+| `rq` | Operator re-rag background job queue (worker on the existing Redis, D-033) | BSD-2-Clause |
 | `hvac` | Vault client | Apache-2.0 |
 | `anthropic` | LLM SDK | MIT |
 | `langgraph` | Bounded agent loop | MIT |

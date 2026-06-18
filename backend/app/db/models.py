@@ -117,6 +117,35 @@ class AuditLog(Base):
     )
 
 
+class ReragJob(Base):
+    # Operator re-rag job history (D-033). Operator/cross-tenant data — jobs are
+    # NOT player-owned — so it gets the SAME treatment as audit_log/tenants: NO
+    # RLS policy, role-gated via require_operator at the API (D-017 two-
+    # categories). The worker (terramind_app) INSERTs/UPDATEs rows with no tenant
+    # context. Kept minimal: id/version/status/progress/timestamps/error.
+    __tablename__ = "rerag_jobs"
+
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    # queued | running | succeeded | failed
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
+    stage: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    done: Mapped[int] = mapped_column(nullable=False, default=0)
+    total: Mapped[int] = mapped_column(nullable=False, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class TenantPreferences(Base):
     # Per-tenant config (D-011 revision, Phase 5.1). RLS-scoped fail-closed like
     # sessions/messages (see the tenant_preferences migration). A SEPARATE table,

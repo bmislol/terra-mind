@@ -621,6 +621,98 @@ Operator surface + THE DEMO FALLBACK (RUNBOOK §7.1). Full-parity test chat is t
 - [x] **Manual verify (done-when):** operator login → test chat preset → agent answer + routing render (no game); versions/tenants/audit load; **player blocked**. Verified in-browser; the test chat is the RUNBOOK §7.1 demo-fallback artifact.
 - [x] CI green (backend **259 tests**; bench has no CI — Streamlit, like the React portal). `ARCH.md §13.1`, RUNBOOK §7.1 + §3, DECISIONS (P-018/P-019 + D-017 generalized), LICENSES (streamlit/httpx). **5.2 done — Section 5 complete.**
 
+### Phase 5.3 · Operator-triggered re-rag (background job) — `feat/23-rerag-job`
+> **Scope addition (reverses P-019 → D-033).** P-019 deferred the re-rag
+> *button* ("script is must-have, button is stretch"). This phase reverses
+> that — operator-triggered re-rag as a **robust background job** (RQ
+> worker on the existing Redis + retries + restart-survival), with a
+> single-job 409 guard and streamed progress. **Conscious reversal,
+> accepted cost: a worker/broker infra build ahead of the graded Section
+> 6.** **Scope locked (D-033):** re-embed the **cached** corpus now
+> (`build_corpus.py` path — deterministic, no live-wiki egress in the
+> worker); a re-scrape step is a documented **seam**, not built. The job
+> uses the **idempotent upsert, NEVER `--force`** (the audit found
+> `--force` leaves a half-deleted version on mid-job death; the upsert key
+> `(page_id, chunk_index, game_version)` converges safely on retry).
+> Built in **4 staged commits**, green at each.
+
+**Plan-first (done):**
+- [x] **Reversal logged** — P-019 → **D-033** in DECISIONS (reversal +
+      rationale + accepted cost + locked scope). _(commit 1)_
+- [x] **Audit `build_corpus.py` + stack** — found: it reads the **cached**
+      `pages/`+`cargo/` (does **not** scrape); the upsert
+      `ON CONFLICT (page_id, chunk_index, game_version) DO UPDATE` is
+      **already retry-idempotent** (no dupes, no half-version) — but
+      `--force` (delete-then-insert) is **not** (half-deleted version on
+      mid-job death) → the job uses the upsert, never `--force`; progress
+      via a thread-through callback; worker needs DB + data volume RW +
+      model + Redis, **no Vault**.
+
+**Commit 1 — worker/broker infra:**
+- [x] `rq` runtime dep (+ LICENSES, mypy override); `uv lock && uv sync`.
+- [x] `worker` compose service — api image, `rq worker rerag`,
+      `DATABASE_URL` + data volume **RW** + Redis (`RQ_REDIS_URL`),
+      `depends_on` db/redis, **no Vault**, `restart: unless-stopped`.
+- [x] `app/jobs/` — sync RQ queue wiring (`queue.py`, name `rerag`) +
+      a trivial `smoke.py:ping()` no-op job.
+- [x] **Round-trip test** — enqueue `ping` → `SimpleWorker(burst)` on
+      fakeredis → asserts `finished` + `"pong"` (`tests/jobs/test_smoke.py`).
+- [x] **Cold-boot check** — `down && up --build`: worker comes up, doesn't
+      break the clean boot (api still flips healthy, frontends start).
+- [x] A-gate green (ruff/format/mypy/pytest incl. the round-trip).
+
+**Commit 2 — `build_corpus` progress refactor (done):**
+- [x] Extract a callable `run_build(version, db_url, *, force=False,
+      progress=…)`; CLI unchanged (default print cb); progress threaded at
+      the report points (`loading` → `embedding` to 100%). Default
+      `force=False` = the idempotent upsert (the worker's retry-safe path,
+      D-033); `--force` stays CLI-only, never the job. Existing corpus
+      tests green + a new test asserts the callback fires and the build
+      still upserts. A-gate green (262 tests).
+
+**Commit 3 — API + job + guard (done):**
+- [x] `rerag_jobs` table (migration `e4f5a6b7c8d9`) — minimal (id, version,
+      status, stage/done/total, created/started/finished, error);
+      **operator/cross-tenant → NO RLS policy, `terramind_app` grant +
+      `require_operator`-gated** (D-017 two-categories), not a fail-closed
+      tenant policy. Confirmed in the migration.
+- [x] Job fn (`app/jobs/rerag.py`) — sync worker entrypoint: marks running
+      → `run_build(force=False, progress=cb)` writing the Redis hash + the
+      durable row → on success `corpus.reragged` audit + succeeded + release
+      lock; on failure record error + re-raise (RQ retries, idempotent).
+- [x] Single-job guard — `SET rerag:lock NX EX` → **409** if held; worker
+      releases on finish + heartbeats the TTL each tick.
+- [x] `POST /admin/rerag` (202 + job id; 409 if busy) +
+      `GET /admin/rerag/status/{id}` (durable row + live progress overlay),
+      operator-gated. Tests: start→id, 2nd→409, status poll/404, player→403
+      on both, + the job fn (run_build faked) succeeds/audits/releases.
+- [x] **Relocated `run_build` → `app/rag/corpus_build.py`** (the worker
+      image ships `app/` not `scripts/`; avoids an app→scripts inversion).
+      `scripts/build_corpus.py` is now a thin CLI. **Fixed** the sync DSN to
+      `postgresql+psycopg://` (psycopg2 is not a dep — the worker would have
+      crashed at engine creation). A-gate green (266 tests).
+
+**Commit 4 — UI + close (done):**
+- [x] Streamlit Versions tab: re-rag button + version select + a
+      `st.fragment(run_every=2)` polling progress bar (stage + done/total) →
+      succeeded/failed terminal; 409 → "already running". Replaces the
+      "script, not a button" note.
+- [x] **Verified in-stack (the payoff — real worker, real corpus).** Fresh
+      operator → `POST /admin/rerag` → **202** + job_id; 2nd → **409**;
+      worker embedded **5157/5157** pages (~5.5 min), progress streamed
+      `300→5157`, job **succeeded**; a **`corpus.reragged`** audit row
+      landed; `rag_chunks` for 1.4.4.9 = **22,173** (queryable). Proves
+      commit 3's relocation + psycopg3 fixes on the real worker+DB+model
+      path (the unit tests faked `run_build`).
+- [x] **Found + fixed live:** RQ's 180s default `job_timeout` killed the
+      first run at 2550/5157 → set `job_timeout=1800` on enqueue (+ unit
+      assertion). (Also: a build-cache disk-full — environmental, freed.)
+      Logged P-020 (lock-released-before-retry, single-worker-harmless) +
+      P-021 (worker/api re-download the model on rebuild → share HF cache).
+- [x] A-gate green; `ARCH.md` (§2 worker + §7 endpoints + §10 re-rag flow +
+      §13.1 button), RUNBOOK §4.1, DECISIONS (D-033 closeout + P-020/P-021),
+      Checklist 5.3, CLAUDE §2. **5.3 done — re-rag button shipped (D-033).**
+
 ---
 
 ## Section 6 — Security, Guardrails & CI (Days 11–12)

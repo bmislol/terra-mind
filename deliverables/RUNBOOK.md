@@ -159,7 +159,23 @@ After `down -v` + rebuild the deterministic IDs will match, and the golden set i
 After `build_corpus` completes, `manifest.json` contains:
 `page_count`, `raw_sha256`, `cargo_scraped_at`, `cargo_raw_sha256`, `cargo_table_counts`, `chunk_count`, `embedding_model`, `embedding_dim`.
 
-The operator's "re-rag" button (Phase 5.2 stretch) wraps step 3 as a background job; the scripts themselves are the must-have.
+### 4.1 Operator re-rag as a background job (Phase 5.3, D-033)
+
+Step 3 (`build_corpus`) is now also operator-triggerable from the Streamlit bench (Versions tab → **Re-rag**) or directly:
+
+```bash
+# (operator access token from §3 + /auth/jwt/login)
+curl -s -X POST http://localhost:8000/admin/rerag \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"version":"1.4.4.9"}'                       # → 202 {job_id, status}; 409 if one runs
+curl -s http://localhost:8000/admin/rerag/status/$JOB_ID -H "Authorization: Bearer $TOKEN"
+```
+
+The **`worker`** compose service (`rq worker rerag`) runs `run_build(force=False)` — the idempotent upsert, **never `--force`** — re-embedding the **cached** corpus (it does not re-scrape; that's a documented seam). It needs `DATABASE_URL` + the data volume (RW) + the embedding model, **no Vault**. Progress streams to the UI (Redis live hash + the durable `rerag_jobs` row); a `corpus.reragged` audit row is written on success (visible in the bench's Audit tab). One job at a time (a 2nd → **409**); `job_timeout` is 1800s (a full re-embed of the ~5k-page corpus takes minutes — RQ's 180s default would kill it).
+
+> **The worker needs the embedding model.** Like the api, it loads `all-MiniLM-L6-v2` on the first re-rag; on a fresh image this downloads from HF (slow under rate-limiting). For repeatable runs, share the HF cache across rebuilds (a cache volume / mounted `~/.cache/huggingface`) so neither api nor worker re-downloads.
+
+The `build_corpus.py` CLI remains the **must-have** fallback; the button is the convenience layer over the same `run_build`.
 
 ## 5. Running the Eval Suites
 

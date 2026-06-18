@@ -176,6 +176,31 @@ services:
       # `down && up --build`. (150s false-alarmed under build contention.)
       start_period: 240s
 
+  # ── Worker (background jobs) ────────────────────────────────────────────────
+
+  # RQ worker for the operator-triggered re-rag job (D-033). Same image as api;
+  # runs jobs independently of the api (a re-rag survives an api restart). It
+  # needs only the DB, the embedding model, and the cached corpus — NO Vault.
+  worker:
+    build:
+      context: backend
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Long-running; come back if it crashes (the api restarting must not kill jobs).
+    restart: unless-stopped
+    environment:
+      # App-role DSN — the re-rag job upserts rag_chunks (shared corpus, RLS-exempt).
+      DATABASE_URL: ${DATABASE_URL}
+      # Broker — the same Redis the api enqueues onto; the `rq` CLI reads this for --url.
+      RQ_REDIS_URL: redis://redis:6379/0
+    volumes:
+      # Re-rag reads pages/ + cargo/ and writes manifest.json → read-WRITE (api is :ro).
+      - ./backend/data/raw:/app/data/raw
+    command: ["rq", "worker", "rerag"]
+
   # ── Frontends ──────────────────────────────────────────────────────────────
 
   frontend-admin:
