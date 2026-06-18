@@ -75,6 +75,7 @@ _PROMPT_FILES: tuple[tuple[str, str], ...] = (
     ("faq_answer", "faq_answer.md"),
     ("agent_system", "agent_system.md"),
     ("class_fallback", "class_fallback.md"),
+    ("guardrail_judge", "guardrail_judge.md"),
 )
 
 
@@ -96,6 +97,7 @@ def _load_prompts(prompts_dir: Path) -> LoadedPrompts:
         faq_answer=loaded["faq_answer"],
         agent_system=loaded["agent_system"],
         class_fallback=loaded["class_fallback"],
+        guardrail_judge=loaded["guardrail_judge"],
     )
 
 

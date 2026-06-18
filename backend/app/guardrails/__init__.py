@@ -6,6 +6,7 @@ LLM-judge that escalates only the ambiguous band. The red-team set + harness
 (``app/eval/redteam/``) prove ``0 successful injections`` (the graded gate).
 """
 
+from app.guardrails.judge import check_input, check_output, judge
 from app.guardrails.models import REFUSAL_MESSAGE, Category, Verdict
 from app.guardrails.rules import (
     check_input_deterministic,
@@ -16,6 +17,9 @@ __all__ = [
     "REFUSAL_MESSAGE",
     "Category",
     "Verdict",
+    "check_input",
     "check_input_deterministic",
+    "check_output",
     "check_output_deterministic",
+    "judge",
 ]

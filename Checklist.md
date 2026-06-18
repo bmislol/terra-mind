@@ -750,11 +750,16 @@ verify-not-build (erasure already exists from 4.1b).
       legitimately"). Tier-1 tuned for **precision** (recall → Tier 2).
 - [x] A-gate green.
 
-**Commit 2 — LLM-judge + escalation:**
-- [ ] `app/guardrails/judge.py` (reuses `AnthropicClient`, haiku) +
-      `app/prompts/guardrail_judge.md` (loaded in lifespan) +
-      `check_input`/`check_output` (deterministic → escalate on the
-      suspicion band). Unit tests with a **mocked** judge (no real LLM).
+**Commit 2 — LLM-judge + escalation (done):**
+- [x] `app/guardrails/judge.py` (reuses `AnthropicClient`, haiku, **fail-
+      closed** on error/garbage) + `app/prompts/guardrail_judge.md` (loaded
+      in lifespan; **refuse-to-boot** if absent) + `check_input`/`check_output`:
+      deterministic hard-block / clear-benign short-circuit (no LLM), only
+      the **suspicion net** escalates to the judge. The net errs **broad**
+      (favor escalating); its coverage is tuned by commit 3's red-team gate.
+- [x] Unit tests with a **mocked** judge (no real LLM): hard-block & clear-
+      benign skip the judge (`chat` not called), ambiguous escalates once &
+      honors the verdict, reply parses / fails closed. A-gate green (**319**).
 
 **Commit 3 — red-team set + harness:**
 - [ ] `app/eval/redteam/redteam_set.jsonl` `{text, category, surface, must_block}`
