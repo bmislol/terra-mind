@@ -780,16 +780,20 @@ verify-not-build (erasure already exists from 4.1b).
       over-block, stable across 3 runs**. Tunings are general classes, not the
       verbatim set strings. A-gate green (324 + 1 deselected).
 
-**Commit 4 — wire into `/bot/ask`:**
-- [ ] Input hook (after `resolve_session`, before routing) + output hook
-      (before `record_turn`/return); block → refusal + `guardrail.blocked`
-      audit. Integration tests (attack→blocked/no-routing, benign→passes,
-      bad-output→refusal).
-
-**Commit 5 — closeout:**
-- [ ] CI green; `SECURITY.md §8` (guardrails), `EVALS.md §2` (red-team gate),
-      DECISIONS (D-034 closeout), `eval-redteam.yml` confirmed, Checklist 6.1
-      + CLAUDE §2. Tick 6.1.
+**Commit 4 — wire into `/bot/ask` + close 6.1 (done):**
+- [x] Input hook (after `resolve_session`, before routing — ARCH §5 step 4) +
+      output hook (before `record_turn`/return — step 9), via a thin
+      `app/services/guardrails.py` (keeps the LLM-judge call in the service
+      layer). Block → generic refusal + `guardrail.blocked` audit
+      (operator/cross-tenant, no RLS — D-017); input-block skips routing+answer.
+- [x] Integration tests (mocked judge): attack → blocked, **router never
+      called**, audited; benign → passes through (routing=faq); leaking output
+      → replaced with the refusal + audited. **327 tests** (+3), 1 deselected.
+- [x] Closeout: `SECURITY.md §8` (two tiers + gate + the self-validation
+      argument), `EVALS.md §2` (set at `data/eval/redteam.jsonl` + the 13→0
+      convergence table), `eval-redteam.yml` paths extended (set + judge prompt;
+      needs the `ANTHROPIC_API_KEY` secret), Checklist 6.1, CLAUDE §2.
+      **6.1 done — the graded core: real red-team gate at 0 successful.**
 
 ### Phase 6.2 · Right-to-erasure — VERIFY end-to-end — `feat/25-erasure`
 > **Mostly built already** (4.1b: `DELETE /me` purges Postgres + Redis,
