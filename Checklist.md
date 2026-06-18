@@ -716,19 +716,97 @@ Operator surface + THE DEMO FALLBACK (RUNBOOK §7.1). Full-parity test chat is t
 ---
 
 ## Section 6 — Security, Guardrails & CI (Days 11–12)
-> _Outline — expand when reached._
 
-### Phase 6.1 · Guardrails + red-team — `feat/22-guardrails`
-- Goal: input/output filter (deterministic + LLM-judge) vs injection / "give me dev items" / toxicity; red-team set (graduate P-006).
-- Touches: `app/guardrails/`, `data/eval/`, `SECURITY.md`. Done-when: red-team set passes (0 successful injections).
+Goal: the graded core — guardrails that block misuse, a red-team set that
+proves it (0 successful injections), and CI eval gates that turn a
+regression RED. This is where Project Rule 4 ("the evals are the grade")
+is satisfied, and where P-006 (guardrail/red-team set) + P-016's broad
+measurement land. Mostly NEW backend (guardrails) + CI wiring; 6.2 is
+verify-not-build (erasure already exists from 4.1b).
 
-### Phase 6.2 · Right-to-erasure end-to-end — `feat/23-erasure`
-- Goal: `DELETE /me` purges Postgres rows + Redis session; audit-logged.
-- Touches: `app/api`, `app/services`, `SECURITY.md`. Done-when: erasure verified empty + audit row written.
+### Phase 6.1 · Guardrails + red-team set — `feat/24-guardrails`
+> **The graded core (Project Rule 4).** Resolves P-006 → **D-034**:
+> **deterministic-first** guardrail (Tier-1 regex, zero-LLM common path) +
+> an **escalation LLM-judge** (haiku, ambiguous band only — not every
+> turn, D-003) on both `/bot/ask` surfaces; 3 categories (prompt injection
+> / game-jailbreak / toxicity); block → generic refusal + `guardrail.blocked`
+> audit (D-017). Red-team set keyed on **adversarial diversity** + benign
+> controls; gate `redteam.max_successful_injections: 0` (harness compares
+> **directly** — the key has no `_min`/`_max` suffix, by design). **5 staged
+> commits.**
 
-### Phase 6.3 · CI eval gates green — `feat/24-ci-eval-gates`
-- Goal: `eval-redteam.yml` (PR-triggered, no DB) red on injection success; `eval-rag.yml` thresholds enforced; both green on `main`.
-- Touches: `.github/workflows/`, `EVALS.md`. Done-when: a regression turns CI red on purpose, then green when fixed.
+**Plan-first (done):**
+- [x] **P-006 → D-034** in DECISIONS (architecture + accepted-coverage-risk-
+      mitigated-by-the-gate reasoning).
+
+**Commit 1 — deterministic core (done):**
+- [x] `app/guardrails/`: domain (`Verdict{blocked, category, reason}`,
+      `Category` enum, the player-facing refusal constant) + per-category
+      Tier-1 rule sets + `check_input_deterministic` /
+      `check_output_deterministic` (regex, **zero LLM**).
+- [x] Fast unit tests, **no LLM**: each category's obvious cases BLOCK, and
+      the **benign-passes** cases PASS (over-block guard from the start —
+      "beat the Moon Lord" / "what does Zenith drop" / "get dev items
+      legitimately"). Tier-1 tuned for **precision** (recall → Tier 2).
+- [x] A-gate green.
+
+**Commit 2 — LLM-judge + escalation:**
+- [ ] `app/guardrails/judge.py` (reuses `AnthropicClient`, haiku) +
+      `app/prompts/guardrail_judge.md` (loaded in lifespan) +
+      `check_input`/`check_output` (deterministic → escalate on the
+      suspicion band). Unit tests with a **mocked** judge (no real LLM).
+
+**Commit 3 — red-team set + harness:**
+- [ ] `app/eval/redteam/redteam_set.jsonl` `{text, category, surface, must_block}`
+      (diverse techniques + benign controls) + `app/eval/redteam/harness.py`
+      + `tests/test_eval_redteam.py` (`@pytest.mark.redteam`). Harness compares
+      `successful <= max_successful_injections` **directly**. **Run the real
+      set (API key) → prove 0 successful + 0 over-block** before committing.
+
+**Commit 4 — wire into `/bot/ask`:**
+- [ ] Input hook (after `resolve_session`, before routing) + output hook
+      (before `record_turn`/return); block → refusal + `guardrail.blocked`
+      audit. Integration tests (attack→blocked/no-routing, benign→passes,
+      bad-output→refusal).
+
+**Commit 5 — closeout:**
+- [ ] CI green; `SECURITY.md §8` (guardrails), `EVALS.md §2` (red-team gate),
+      DECISIONS (D-034 closeout), `eval-redteam.yml` confirmed, Checklist 6.1
+      + CLAUDE §2. Tick 6.1.
+
+### Phase 6.2 · Right-to-erasure — VERIFY end-to-end — `feat/25-erasure`
+> **Mostly built already** (4.1b: `DELETE /me` purges Postgres + Redis,
+> audit-logged, owner-connection physical-deletion test; 5.1/D-032:
+> retains preferences). This phase = prove it end-to-end as a live demo +
+> close any gap, NOT rebuild it.
+- [ ] Verify `DELETE /me` end-to-end live: a tenant with sessions +
+      messages + Redis session + prefs → erase → conversation rows gone
+      (owner-connection check), Redis session cleared, `tenant.erased`
+      audit row written, prefs retained (D-032).
+- [ ] Confirm the existing `test_erasure.py` covers it; add any missing
+      assertion (Redis-cleared, audit-written) if not already there.
+- [ ] Demo path: erasure via the React portal button (5.1) → show the
+      rows gone + audit row (the brief's "delete my data" demo).
+- [ ] `SECURITY.md §6/§7` reflects the proven flow. Tick 6.2.
+
+### Phase 6.3 · CI eval gates green — `feat/26-ci-eval-gates`
+- [ ] **`eval-redteam.yml`** (PR-triggered, no DB — exercises the
+      guardrail filter on inputs/outputs): RED on any successful
+      injection, green at 0. Runs on PRs touching `app/guardrails/`, the
+      red-team set, or the guardrail prompts.
+- [ ] **`eval-rag.yml`** (manual-dispatch, needs the live corpus DB):
+      enforces the `eval_thresholds.yaml` hit@k / MRR floors; a
+      regression below threshold fails the job.
+- [ ] **Prove the gate works**: deliberately introduce a regression
+      (a guardrail bypass / a threshold miss) → CI turns RED → fix → green.
+      This is the "a regression must turn the build red" requirement,
+      demonstrated.
+- [ ] **P-016 broad measurement** (deferred from 4.4): measure the
+      agent-grounding fix across the RAG golden set / progression
+      questions (not just the in-game n≈5) — record whether it
+      helps/regresses, as a number. Lands here with the eval harness.
+- [ ] CI green on `main`; `EVALS.md` (both gates + the regression proof),
+      final numbers table started. Tick 6.3 → Section 6 complete.
 
 ---
 
