@@ -9,6 +9,7 @@ import {
   updatePreferences,
 } from "../api";
 import { isGuestSession } from "../auth";
+import { ThemeToggle } from "./ThemeToggle";
 
 export function ConfigPanel({ onLogout }: { onLogout: () => void }) {
   const [isGuest] = useState(isGuestSession);
@@ -142,8 +143,13 @@ export function ConfigPanel({ onLogout }: { onLogout: () => void }) {
         {saving ? "Saving…" : "Save preferences"}
       </button>
       {saved && (
-        <p className="notice">Saved at {saved}. Reload the page to confirm it persists.</p>
+        <p className="notice">
+          <span aria-hidden="true">✓</span> Saved {saved} — persists across reload.
+        </p>
       )}
+
+      <hr />
+      <ThemeToggle />
 
       {isGuest ? (
         <>

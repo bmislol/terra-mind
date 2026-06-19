@@ -1,0 +1,11 @@
+# Streamlit theme (Phase 7.1) — Everforest dark-hard, matching the React
+# portal's dark theme so the two surfaces read as one product. Streamlit themes
+# are startup-only (no runtime toggle), so the bench is dark-only by design.
+# The COPY . . Dockerfile picks this up automatically.
+[theme]
+base = "dark"
+primaryColor = "#a7c080"             # Everforest green accent (matches the portal)
+backgroundColor = "#1e2326"          # Everforest dark-hard background
+secondaryBackgroundColor = "#272e33" # surface — sidebar, widgets, bordered cards
+textColor = "#d3c6aa"                # Everforest foreground
+font = "sans serif"
