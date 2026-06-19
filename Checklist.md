@@ -851,19 +851,60 @@ verify-not-build (erasure already exists from 4.1b).
 ---
 
 ## Section 7 — Polish & Present (Days 13–14)
-> _Outline — expand when reached._
 
-### Phase 7.1 · Isolation **re-demo** (live) — `feat/25-isolation-demo`
-- Goal: live re-demonstration of the isolation **already proven in CI at Phase 4.1b** — a second tenant shown end-to-end so the defense sees it, not first proof.
-- Done-when: Tenant A query can't surface Tenant B data, shown live end-to-end (the `tests/services/test_rls_isolation.py` gate from 4.1b is the proof; this is the visual demo of it).
+Goal: the graded core is DONE and merged (Sections 1-6). Section 7 is
+NON-GRADED — no new scored functionality. It's making what exists
+presentable + rehearsing the demo. Mode shift: polish & present, not
+build & prove. Branch numbering continues at feat/27.
 
-### Phase 7.2 · Deliverables finalize + README — `feat/26-runbook-deliverables`
-- Goal: `RUNBOOK.md §demo` numbered click-through; finalize `EVALS/SECURITY/LICENSES`; real `README.md`.
-- Done-when: a cold reader can boot and run the demo from the docs alone.
+### Phase 7.1 · UI polish — both web surfaces — `feat/27-ui-polish`
+> Deferred from 5.1 (React portal) + 5.2 (Streamlit bench), acknowledged
+> functional-not-pretty. This is what the panel SEES in the demo, so it's
+> demo-critical, not optional.
+- [ ] React portal (frontend-user): visual pass — consistent spacing,
+      readable typography, a coherent color treatment, clear states
+      (loading / error / success), the erasure-confirm flow legible.
+      Don't rebuild — restyle. No new features.
+- [ ] Streamlit bench (frontend-admin): tidy the operator/test-chat
+      layout, label the tabs clearly, make the test-chat presets +
+      routing/payload display readable for a live audience.
+- [ ] Verify both still work after restyling (in-browser, the existing
+      flows — login, prefs, erasure, test-chat, re-rag, audit).
+- [ ] No backend changes (CI stays green by not touching it). Done-when:
+      both surfaces look intentional on a projector.
 
-### Phase 7.3 · Demo prep + buffer — `feat/27-demo-prep`
-- Goal: rehearse the demo; record; absorb slippage.
-- Done-when: clean run-through within time; buffer consumed by overflow from earlier phases.
+### Phase 7.2 · Live demo re-runs — isolation + erasure + guardrail — `feat/28-demo-reruns`
+> The graded headlines, re-shown LIVE for the defense (the CI tests are
+> the proof; these are the visual demonstrations of proofs that already
+> passed). Rehearse + capture each.
+- [ ] **Isolation re-demo** (the headline): two tenants, end-to-end —
+      Tenant A's query cannot surface Tenant B's data, shown live. The
+      tests/services/test_rls_isolation.py gate (4.1b) is the proof; this
+      is the visual.
+- [ ] **Erasure re-demo** (6.2): the portal "delete my data" → content
+      gone, account/prefs kept (you've done this; rehearse it clean).
+- [ ] **Guardrail re-demo** (6.1): send an injection live → blocked +
+      generic refusal → show the guardrail.blocked row in the Audit tab.
+- [ ] **Test-chat fallback** (RUNBOOK §7.1): rehearse the Streamlit
+      test-chat as the demo fallback if the live game won't cooperate.
+- [ ] Each captured/scripted so they're repeatable under pressure.
+
+### Phase 7.3 · Deliverables finalize + README — `feat/29-deliverables`
+- [ ] RUNBOOK §demo: a numbered click-through a cold reader can follow.
+- [ ] Finalize ARCH / DECISIONS / EVALS / SECURITY / LICENSES — reconcile
+      any drift, confirm every number is real, the decisions ledger
+      current, the deferred-items (P-015 etc.) honestly listed.
+- [ ] A real README.md (what it is, how to boot, where the docs are,
+      the headline claims + where they're proven).
+- [ ] Done-when: a cold reader can boot the stack + run the demo from the
+      docs alone.
+
+### Phase 7.4 · Demo rehearsal + buffer — `feat/30-demo-prep`
+- [ ] Full run-through end to end, within time. The mod live-path +
+      fallbacks.
+- [ ] Record a clean run (insurance if the live demo breaks).
+- [ ] Buffer: absorbs overflow from 7.1-7.3 + any earlier slippage.
+- [ ] Done-when: a clean, timed run-through you're confident in.
 
 ---
 
