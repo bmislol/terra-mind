@@ -98,7 +98,28 @@ _MAGE_HARDMODE: dict[str, Any] = {
     },
 }
 
+# The n≈0 progression baseline: a brand-new world — what the agent says with
+# nothing earned yet. Only the starting Copper Shortsword (3507 = melee, the
+# truthful item_id path), empty everything else, no bosses, pre-hardmode.
+_FRESH_START: dict[str, Any] = {
+    "game_version": "1.4.4.9",
+    "gear": {
+        "armor": [],
+        "accessories": [],
+        "weapon": {
+            "item_id": 3507,
+            "name": "Copper Shortsword",
+            "prefix": None,
+            "stack": 1,
+        },
+    },
+    "inventory": [],
+    "stats": {"life": 100, "max_life": 100, "mana": 20, "max_mana": 20, "defense": 0},
+    "world": {"hardmode": False, "downed_bosses": [], "biome": "forest"},
+}
+
 PRESETS: dict[str, dict[str, Any]] = {
+    "Fresh start — brand-new world": _FRESH_START,
     "Melee — pre-boss (early game)": _MELEE_PRE_BOSS,
     "Ranger — post-Eye of Cthulhu": _RANGER_POST_EOC,
     "Mage — hardmode, post-Plantera": _MAGE_HARDMODE,

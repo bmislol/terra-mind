@@ -861,17 +861,34 @@ build & prove. Branch numbering continues at feat/27.
 > Deferred from 5.1 (React portal) + 5.2 (Streamlit bench), acknowledged
 > functional-not-pretty. This is what the panel SEES in the demo, so it's
 > demo-critical, not optional.
-- [ ] React portal (frontend-user): visual pass — consistent spacing,
+- [x] React portal (frontend-user): visual pass — consistent spacing,
       readable typography, a coherent color treatment, clear states
       (loading / error / success), the erasure-confirm flow legible.
       Don't rebuild — restyle. No new features.
-- [ ] Streamlit bench (frontend-admin): tidy the operator/test-chat
+- [x] Streamlit bench (frontend-admin): tidy the operator/test-chat
       layout, label the tabs clearly, make the test-chat presets +
       routing/payload display readable for a live audience.
-- [ ] Verify both still work after restyling (in-browser, the existing
+- [x] Verify both still work after restyling (in-browser, the existing
       flows — login, prefs, erasure, test-chat, re-rag, audit).
-- [ ] No backend changes (CI stays green by not touching it). Done-when:
+- [x] No backend changes (CI stays green by not touching it). Done-when:
       both surfaces look intentional on a projector.
+
+**Scope as-built (two commits, both verified in-browser):**
+- **Commit 1 — React portal:** Everforest **theme picker** (light-hard /
+  dark-hard, default **dark**, `localStorage`-persisted, `data-theme`
+  applied before first paint) + spacing/type/state polish + brand
+  monogram/favicon. `npm run build` green (the gate; no frontend CI).
+- **Commit 2 — Streamlit bench:** Everforest **dark-only** theme
+  (`.streamlit/config.toml` — Streamlit themes are **startup-only**, no
+  runtime toggle, **D-035**) + UX: preset **detail table** (Field/Value,
+  not a JSON blob), new **"Fresh start"** n≈0 preset (listed first),
+  **Versions tab** reordered (re-rag on top, versions as a table),
+  `source_chunks` as a table, **"Reset chat"** relabel + a confirmation
+  toast. **No logic touched** — `api.*` calls, operator gating, the re-rag
+  polling fragment, the `/bot/ask` path, and the preset→payload wiring are
+  all intact; scoped `frontend-admin` rebuilds (backend never touched).
+- Both surfaces verified in-browser; backend untouched → `ci.yml`
+  (backend-only) just confirms green. **7.1 done. Next: 7.2.**
 
 ### Phase 7.2 · Live demo re-runs — isolation + erasure + guardrail — `feat/28-demo-reruns`
 > The graded headlines, re-shown LIVE for the defense (the CI tests are
